@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>icon</title>
+<script src="panel/util.js"></script>
+<script src="panel/core.js"></script>
+<script>
+// Dibuja el ícono del Dock: placa oscura de esquinas redondeadas (estilo macOS) y encima la forma elegida
+// (dos anillos, donut o tortas) con el número, usando el mismo drawIcon() que la extensión.
+function renderIcon(params, size) {
+  const inner = document.createElement("canvas");
+  inner.width = inner.height = size;
+  drawIcon(inner.getContext("2d"), size, params);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const margin = size * 0.098, body = size - margin * 2, radius = body * 0.2237;
+  const round = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  };
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = size * 0.03; ctx.shadowOffsetY = size * 0.012;
+  const g = ctx.createLinearGradient(0, margin, 0, size - margin);
+  g.addColorStop(0, "#3b3f46"); g.addColorStop(1, "#1b1d21");
+  ctx.fillStyle = g; round(margin, margin, body, body, radius); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = Math.max(1, size * 0.004);
+  round(margin, margin, body, body, radius); ctx.stroke();
+
+  const s = body * 0.76, o = (size - s) / 2;
+  ctx.drawImage(inner, o, o, s, s);
+  return canvas.toDataURL("image/png");
+}
+</script>

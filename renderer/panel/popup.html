@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Usage Monitor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Usage Monitor</h1>
+        <p id="status" class="muted">Consultando…</p>
+      </div>
+      <button id="refresh" class="icon-btn" title="Actualizar ahora" aria-label="Actualizar ahora">↻</button>
+    </header>
+
+    <section class="hero" aria-live="polite">
+      <div class="hero-row">
+        <div id="percent" class="percent">—%</div>
+        <div class="hero-text">
+          <div id="headline" class="headline"><span id="v-icon" class="v-icon" aria-hidden="true"></span><span id="v-text">Consultando…</span></div>
+          <div id="detail" class="muted"></div>
+          <div id="why" class="why muted"></div>
+        </div>
+      </div>
+      <div id="meter" class="meter" role="img" aria-label="Uso frente al tiempo transcurrido">
+        <div id="meter-fill" class="meter-fill"></div>
+        <div id="meter-time" class="meter-time"></div>
+      </div>
+      <div class="meter-legend muted">
+        <span><i class="key key-fill"></i>Uso</span>
+        <span><i class="key key-time"></i>Tiempo transcurrido: <b id="elapsed">—</b></span>
+      </div>
+    </section>
+
+    <section class="tiles">
+      <div class="tile"><span>Reinicio</span><strong id="reset">—</strong><em id="reset-in" class="muted"></em></div>
+      <div class="tile"><span>Límite</span><strong id="limit">—</strong><em id="limit-in" class="muted"></em></div>
+      <div class="tile"><span>Ritmo</span><strong id="rate">—</strong><em id="confidence" class="muted"></em></div>
+      <div class="tile"><span>Al reinicio</span><strong id="at-reset">—</strong><em id="at-reset-sub" class="muted">proyección</em></div>
+    </section>
+
+    <section id="weekly" class="weekly" hidden></section>
+    <section id="error" class="error" hidden></section>
+
+    <section class="charts">
+      <div class="chart-bar">
+        <div class="tabs" role="tablist" aria-label="Gráfico">
+          <button role="tab" data-tab="window" aria-selected="true">Ventana</button>
+          <button role="tab" data-tab="hours" aria-selected="false">24 horas</button>
+          <button role="tab" data-tab="windows" aria-selected="false">Ventanas</button>
+        </div>
+        <div class="tabs views" role="group" aria-label="Vista">
+          <button data-view="chart" aria-pressed="true">Gráfico</button>
+          <button data-view="table" aria-pressed="false">Tabla</button>
+        </div>
+      </div>
+      <div id="chart" class="chart"></div>
+      <div id="legend" class="legend muted"></div>
+      <p id="caption" class="muted caption"></p>
+    </section>
+
+    <details class="settings">
+      <summary>Ajustes y datos</summary>
+      <label class="field">
+        <span>Qué muestra el número</span>
+        <select id="badge-mode">
+          <option value="pace">Veredicto: solo avisa si hay riesgo</option>
+          <option value="prob">Probabilidad de agotarlo</option>
+          <option value="percent">Porcentaje de uso</option>
+          <option value="limit">Tiempo hasta el límite</option>
+          <option value="reset">Tiempo hasta el reinicio</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Forma del ícono</span>
+        <select id="icon-shape">
+          <option value="rings">Dos anillos</option>
+          <option value="donut">Donut + anillo de tiempo</option>
+          <option value="pie1">Torta 1 (uso)</option>
+          <option value="pie2">Torta 2 (uso + anillo de tiempo)</option>
+          <option value="pie3">Torta 3 (uso + torta de tiempo)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Transparencia del número <b id="alpha-value"></b></span>
+        <input type="range" id="number-alpha" min="15" max="100" step="5">
+      </label>
+      <div class="icon-preview" aria-hidden="true">
+        <div class="pv light"><canvas id="pv-light" width="128" height="128"></canvas><canvas id="pv-light-s" width="32" height="32"></canvas></div>
+        <div class="pv dark"><canvas id="pv-dark" width="128" height="128"></canvas><canvas id="pv-dark-s" width="32" height="32"></canvas></div>
+      </div>
+      <label class="field">
+        <span>Tamaño del número <b id="scale-value"></b></span>
+        <input type="range" id="number-scale" min="50" max="160" step="5">
+      </label>
+      <label class="field">
+        <span>Posición horizontal <b id="dx-value"></b></span>
+        <input type="range" id="number-dx" min="-30" max="30" step="1">
+      </label>
+      <label class="field">
+        <span>Posición vertical <b id="dy-value"></b></span>
+        <input type="range" id="number-dy" min="-30" max="30" step="1">
+      </label>
+      <div class="actions"><button id="number-reset" class="text-btn">Restablecer número</button></div>
+      <label class="toggle"><input type="checkbox" id="alerts"> Alertas al 80 %, 90 % y si el límite llega antes del reinicio</label>
+      <p id="precision" class="muted precision"></p>
+      <div class="actions">
+        <button id="export" class="text-btn">Exportar CSV</button>
+        
+        <button id="export-weekly" class="text-btn">Exportar semanal</button>
+        
+      </div>
+    </details>
+
+    <footer>Los tiempos son estimaciones, no garantías. Claude puede cambiar su API.</footer>
+  </main>
+  <div id="tip" class="tip" role="status" hidden></div>
+  <script src="util.js"></script>
+  <script src="core.js"></script>
+  <script src="model.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

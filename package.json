@@ -1,0 +1,19 @@
+{
+  "name": "usage-monitor",
+  "version": "0.1.0",
+  "description": "Dock icon for macOS that shows your Claude usage and projects it until the window resets.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "test": "node --test tests/",
+    "backtest": "node tests/run-backtest.js",
+    "build": "bash scripts/build-app.sh"
+  },
+  "license": "MIT",
+  "private": true,
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.1.0"
+  }
+}

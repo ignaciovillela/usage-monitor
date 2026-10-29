@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+dist*/
+build/
+selftest/out/
+# datos personales: nunca subas tu propio historial de uso
+*.csv
+usage-data.json
+settings.json

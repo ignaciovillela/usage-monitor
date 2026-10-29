@@ -1,0 +1,6 @@
+const runs = JSON.parse(require('fs').readFileSync(process.argv[2]));
+const rows = [];
+for (const r of runs) { const tw = new Map(r.windowsEval.map(w => [w.resetsAt, w])); for (const c of r.checkpoints) { if (c.day < 15) continue; const w = tw.get(c.resetsAt); if (w) rows.push({ ...c, y: w.hit ? 1 : 0, prof: r.profile }); } }
+const seg = (name, f) => { const m = {}; for (const r of rows) (m[f(r)] ||= []).push(r); console.log('\n' + name); for (const [k, a] of Object.entries(m).sort()) { const p = a.reduce((x, c) => x + c.p, 0) / a.length, y = a.reduce((x, c) => x + c.y, 0) / a.length; console.log(`  ${k.padEnd(14)} n=${String(a.length).padStart(5)} pred ${p.toFixed(3)} obs ${y.toFixed(3)} ${y > p + 0.04 ? ' <-- subestima' : y < p - 0.04 ? ' <-- sobreestima' : ''}`); } };
+for (const prof of ['bursty', 'marathon']) { console.log('=== ' + prof); const sub = rows.filter(r => r.prof === prof); const R0 = rows; rows.length = 0; rows.push(...sub);
+  seg('activo/pausa', r => r.act ? 'activo' : 'en pausa'); seg('minutos restantes', r => (r.R < 60 ? '0-60' : r.R < 120 ? '60-120' : r.R < 200 ? '120-200' : '200+')); seg('uso actual', r => (r.u < 25 ? '0-25' : r.u < 50 ? '25-50' : r.u < 75 ? '50-75' : '75+')); rows.length = 0; rows.push(...R0); }
