@@ -22,7 +22,12 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
 ## Instalar
 
 **Desde un release** (lo más fácil): descarga el zip de tu sistema en [Releases](https://github.com/ignaciovillela/usage-monitor/releases).
-- **macOS (Apple Silicon):** descarga el `.dmg`, ábrelo y **arrastra *Usage Monitor* a *Applications***. La app no está firmada por un desarrollador de Apple ni notarizada, así que la primera vez macOS la bloqueará. Ábrela una vez (pulsa «Listo») y luego haz doble clic en **«Abrir Privacidad y seguridad.webloc»** (está en el mismo `.dmg`): te lleva directo a *Ajustes del Sistema → Privacidad y seguridad*, donde pulsas **«Abrir de todos modos»** junto a *Usage Monitor*. (En macOS anteriores basta con clic derecho → *Abrir*.)
+- **macOS (Apple Silicon) — instalación sin bloqueos, una línea en Terminal:**
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-mac.sh | bash
+  ```
+  Descarga el último `.dmg` con `curl`, copia la app a *Aplicaciones* y la abre. macOS solo bloquea lo que descargan los navegadores (los marca como «descargado de internet»), no lo que baja `curl`, así que no aparece ningún aviso; el script no toca ningún atributo de seguridad ni usa `sudo` (léelo antes: [scripts/install-mac.sh](scripts/install-mac.sh)).
+- **macOS, con el `.dmg` descargado del navegador:** arrastra *Usage Monitor* a *Applications*. La app no está firmada con un certificado de pago de Apple ni notarizada, así que macOS la bloqueará la primera vez. Para permitirla: *Ajustes del Sistema → Privacidad y seguridad → «Abrir de todos modos»* (aparece tras intentar abrirla una vez), o en Terminal `xattr -dr com.apple.quarantine "/Applications/Usage Monitor.app"`. (En macOS anteriores basta con clic derecho → *Abrir*.)
 - **Windows (x64) — experimental, sin probar en un equipo real:** descomprime y ejecuta `Usage Monitor.exe`. Windows SmartScreen avisará porque la app no está firmada: *Más información → Ejecutar de todos modos*. El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
 
 **Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
