@@ -4,7 +4,7 @@ Se agradecen informes de errores, proveedores para otras suscripciones, traducci
 
 ## Preparar
 - Node 20+. Las pruebas del modelo no necesitan instalar nada: `npm test`.
-- Para la app: `npm install`; `npm start` (desarrollo), `npm run selftest` (dibujo y modelo sin red), `npm run build` (crea el `.app`).
+- Para la app: `npm install`; `npm start` (desarrollo), `npm run selftest` (dibujo y modelo sin red), `npm run build` (macOS, crea el `.app`) y `npm run build:win` (Windows). Los releases los compila el workflow `release`.
 
 ## Estructura
 - `renderer/panel/model.js` es el modelo de proyección: funciones puras, sin APIs de navegador ni `Date.now()`: todo recibe `now`, así que los resultados son reproducibles. `step()` es el único punto de entrada (lo usan la app, el backtest y las pruebas).

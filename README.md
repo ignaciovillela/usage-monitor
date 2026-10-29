@@ -2,12 +2,12 @@
 
 > ¿Voy a llegar al límite de uso de Claude antes del reinicio de la ventana? Míralo en el ícono del Dock, sin abrir nada.
 
-App de macOS que lee tu uso de Claude, lo **proyecta hasta el reinicio de la ventana de 5 horas** y muestra el veredicto en el ícono del Dock: anillo de uso, anillo de tiempo transcurrido y, solo si importa, un número (probabilidad de agotarlo o minutos de margen). El detalle está en un panel con gráficos que abres con un clic en el ícono.
+App de macOS y Windows que lee tu uso de Claude, lo **proyecta hasta el reinicio de la ventana de 5 horas** y muestra el veredicto en el ícono del Dock (macOS) o de la bandeja del sistema (Windows): anillo de uso, anillo de tiempo transcurrido y, solo si importa, un número (probabilidad de agotarlo o minutos de margen). El detalle está en un panel con gráficos que abres con un clic en el ícono.
 
 > [!WARNING]
 > **No oficial.** Sin relación con Anthropic ni respaldo suyo. Lee un **endpoint interno y no documentado de claude.ai** usando tu propia sesión, iniciada en una ventana de la app. Puede cambiar o desaparecer sin aviso, y es tu responsabilidad comprobar que ese uso sea aceptable según los términos de tu cuenta. «Claude» es una marca de Anthropic; si publicas un fork, considera cambiar el nombre.
 
-English summary: a macOS Dock app that projects your Claude usage until the 5-hour window resets (probability of hitting the limit, median time, 80 % range) and shows it in the Dock icon. Unofficial; it reads an undocumented claude.ai endpoint with your own session. UI is Spanish-only for now; see [CONTRIBUTING](CONTRIBUTING.md).
+English summary: a macOS (Dock) and Windows (system tray) app that projects your Claude usage until the 5-hour window resets (probability of hitting the limit, median time, 80 % range) and shows it in the Dock icon. Unofficial; it reads an undocumented claude.ai endpoint with your own session. UI is Spanish-only for now; see [CONTRIBUTING](CONTRIBUTING.md).
 
 ## Qué hace
 
@@ -21,15 +21,20 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
 
 ## Instalar
 
-Requiere macOS y Node 20+.
+**Desde un release** (lo más fácil): descarga el zip de tu sistema en [Releases](https://github.com/ignaciovillela/usage-monitor/releases).
+- **macOS (Apple Silicon):** mueve *Usage Monitor.app* a Aplicaciones; la primera vez, clic derecho → *Abrir* (la app no está notarizada).
+- **Windows (x64) — experimental, sin probar en un equipo real:** descomprime y ejecuta `Usage Monitor.exe`. Windows SmartScreen avisará porque la app no está firmada: *Más información → Ejecutar de todos modos*. El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
+
+**Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
 
 ```sh
 npm install
-npm run build        # crea dist/Usage Monitor-darwin-<arq>/Usage Monitor.app
-open "dist/Usage Monitor-darwin-"*/"Usage Monitor.app"
+npm run build        # macOS: crea dist/Usage Monitor-darwin-<arq>/Usage Monitor.app
+npm run build:win    # Windows (ejecutar en Windows): crea dist/Usage Monitor-win32-x64/
+open "dist/Usage Monitor-darwin-"*/"Usage Monitor.app"   # macOS
 ```
 
-La app está firmada ad hoc, sin notarizar: la primera vez, clic derecho → *Abrir* (o permítela en Ajustes del sistema → Privacidad y seguridad). Ofrece moverse a `/Applications` y abrirse al iniciar sesión.
+En macOS la app está firmada ad hoc, sin notarizar: la primera vez, clic derecho → *Abrir* (o permítela en Ajustes del sistema → Privacidad y seguridad). Ofrece moverse a `/Applications` y abrirse al iniciar sesión. Los zip de los releases los compila el workflow `release` de GitHub Actions.
 
 ### Conectar tu cuenta
 
@@ -63,7 +68,7 @@ Para otro servicio o suscripción: [docs/ADAPTING.md](docs/ADAPTING.md).
 
 ## Privacidad
 
-Todo queda en tu equipo: `~/Library/Application Support/Usage Monitor` (historial, modelo, ajustes y la sesión de la ventana de claude.ai). Se guardan porcentajes de uso y horas de reinicio, no contenido de conversaciones. «Exportar CSV» incluye tu patrón de uso: no lo subas al repositorio (`*.csv` está en `.gitignore`).
+Todo queda en tu equipo: `~/Library/Application Support/Usage Monitor` (macOS) o `%APPDATA%\Usage Monitor` (Windows) (historial, modelo, ajustes y la sesión de la ventana de claude.ai). Se guardan porcentajes de uso y horas de reinicio, no contenido de conversaciones. «Exportar CSV» incluye tu patrón de uso: no lo subas al repositorio (`*.csv` está en `.gitignore`).
 
 ## Licencia
 

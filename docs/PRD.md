@@ -1,10 +1,10 @@
-# PRD — Usage Monitor (app de macOS)
+# PRD — Usage Monitor (app de escritorio)
 
 Versión 3.0 · Proyecto de código abierto, **no oficial y sin relación con Anthropic**.
 
 ## 1. Resumen
 
-Usage Monitor responde, sin abrir nada, una pregunta: **¿me voy a quedar sin límite de uso de Claude antes de que se reinicie la ventana de 5 horas?** Es una app de macOS que muestra la respuesta en el ícono del Dock y ofrece un panel con gráficos para el detalle.
+Usage Monitor responde, sin abrir nada, una pregunta: **¿me voy a quedar sin límite de uso de Claude antes de que se reinicie la ventana de 5 horas?** Es una app de escritorio (macOS y Windows) que muestra la respuesta en el ícono del Dock (macOS) o de la bandeja del sistema (Windows) y ofrece un panel con gráficos para el detalle.
 
 ## 2. Problema
 
@@ -89,7 +89,8 @@ Lectura honesta: acierta más y molesta menos, pero **deja pasar algo más de l�
 | Granularidad | El porcentaje llega como entero; la proyección es una estimación estadística. |
 | Aprendizaje | Tras un cambio brusco de hábitos tarda una o dos semanas en reajustarse. |
 | La app debe estar abierta | Solo registra historial mientras corre (por eso se ofrece el inicio automático). |
-| Sin firma de desarrollador | Firma ad hoc; hay que autorizarla en cada Mac. Se compila para tu arquitectura. |
+| **Windows** | Soporte experimental: el ícono dinámico va en la bandeja del sistema (no hay Dock). Compilado por CI y **no probado en un equipo real**; sin firma, así que SmartScreen avisa. Las funciones propias de macOS (mover a Aplicaciones) no existen allí. |
+| Sin firma de desarrollador | macOS: firma ad hoc, hay que autorizarla en cada Mac. Los releases son Apple Silicon; en Intel hay que compilar. |
 | Solo español | La interfaz no está traducida. |
 
 ## 8. Privacidad
