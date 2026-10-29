@@ -1,5 +1,6 @@
 #!/bin/bash
 # Crea un instalador .dmg "arrastra a Aplicaciones" a partir del .app ya compilado (solo macOS, sin dependencias).
+# (Un script .command y un acceso directo .webloc a Ajustes se probaron: macOS bloquea el primero y no abre el segundo con doble clic.)
 # Uso: scripts/make-dmg.sh "dist/Usage Monitor-darwin-arm64/Usage Monitor.app" dist/Usage-Monitor-macos-arm64.dmg
 set -euo pipefail
 APP="${1:?ruta al .app}"
@@ -8,24 +9,14 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 ditto "$APP" "$STAGE/Usage Monitor.app"      # ditto conserva la firma y los atributos
 ln -s /Applications "$STAGE/Applications"    # el destino al que se arrastra
-# Acceso directo a Ajustes del Sistema > Privacidad y seguridad (un .webloc, no un programa: macOS no lo bloquea).
-# Hace doble clic -> abre esa pantalla, donde aparece "Abrir de todos modos" tras el primer intento de abrir la app.
-cat > "$STAGE/Abrir Privacidad y seguridad.webloc" <<'WEBLOC'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>URL</key>
-	<string>x-apple.systempreferences:com.apple.preference.security</string>
-</dict>
-</plist>
-WEBLOC
 cat > "$STAGE/Leer primero.txt" <<'TXT'
 1. Arrastra "Usage Monitor" a "Applications".
-2. Ábrela desde Aplicaciones. Si macOS dice que no puede verificarla, pulsa "Listo".
-3. Haz doble clic en "Abrir Privacidad y seguridad.webloc": te lleva a Ajustes del Sistema.
-   Baja hasta "Seguridad", pulsa "Abrir de todos modos" junto a Usage Monitor y confirma.
-   (La app aún no está firmada ni notarizada por Apple. En macOS anteriores basta clic derecho > Abrir.)
+2. Ábrela. La app no está firmada con un certificado de pago de Apple, así que macOS puede decir que no
+   puede verificarla. Para permitirla:
+     - Ajustes del Sistema > Privacidad y seguridad > baja hasta "Seguridad" > "Abrir de todos modos"
+       (esa opción aparece después de intentar abrirla una vez), o
+     - en Terminal:  xattr -dr com.apple.quarantine "/Applications/Usage Monitor.app"
+Alternativa sin ningún bloqueo: instalar con una línea en Terminal (ver el README del proyecto en GitHub).
 TXT
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
