@@ -1,6 +1,6 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, nativeImage, session, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
@@ -14,6 +14,7 @@ const ICON_REFRESH_MS = 5000;           // el ícono se redibuja cada pocos segu
 const PAGE_RELOAD_MS = 3 * 60 * 60 * 1000;
 
 app.setName("Usage Monitor");
+if (process.platform === "win32") app.setAppUserModelId("io.github.ignaciovillela.usage-monitor");   // necesario para las notificaciones de Windows
 if (process.env.USAGE_MONITOR_DATA) app.setPath("userData", process.env.USAGE_MONITOR_DATA);   // para pruebas: otra instancia, otros datos
 // Instalación anterior (cuando la app se llamaba "Claude Usage"): se copian historial y ajustes una sola vez.
 // La sesión de claude.ai no se copia: hay que iniciarla de nuevo.
@@ -28,7 +29,7 @@ if (!process.env.USAGE_MONITOR_DATA && !SELFTEST && !MAKE_ICON && !process.argv.
 }
 if (!SELFTEST && !MAKE_ICON && !process.argv.some(x => x.startsWith("--panel-shot=")) && !app.requestSingleInstanceLock()) app.quit();
 
-let settings, persisted, win, iconWin, panelWin;
+let settings, persisted, win, iconWin, panelWin, tray = null;   // tray: solo en Windows (macOS usa el Dock)
 const startedAt = Date.now();
 let orgId = null, busy = false, errors = 0, loginShown = false, quitting = false;
 let pollTimer = null, saveTimer = null, lastIconKey = "", lastMenuKey = "", renderChain = Promise.resolve();
@@ -144,7 +145,9 @@ function render(force) {
       if (!force && key === lastIconKey) return;
       lastIconKey = key;
       if (process.env.USAGE_MONITOR_DEBUG) console.log(new Date().toISOString().slice(11, 23), "ícono", key);
-      if (app.dock) app.dock.setIcon(await drawDockIcon(params));
+      const img = await drawDockIcon(params);
+      if (app.dock) app.dock.setIcon(img);
+      if (tray) tray.setImage(img.resize({ width: 32, height: 32, quality: "best" }));
     } catch (e) { console.error("no se pudo dibujar el ícono:", e.message); }
   });
   return renderChain;
@@ -194,6 +197,7 @@ function refreshChrome(force) {
   if (!force && key === lastMenuKey) return;      // el menú solo se reconstruye si cambió algo
   lastMenuKey = key;
   if (app.dock) app.dock.setMenu(Menu.buildFromTemplate(menuTemplate()));
+  if (tray) tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
 function showPanel() {
@@ -350,7 +354,14 @@ app.whenReady().then(async () => {
     const dir = path.join(__dirname, "..", "build");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "icon-1024.png"), img.toPNG());
+    for (const n of [16, 32, 48, 64, 128, 256]) fs.writeFileSync(path.join(dir, `icon-${n}.png`), img.resize({ width: n, height: n, quality: "best" }).toPNG());   // para el .ico de Windows
     return app.exit(0);
+  }
+  if (process.platform === "win32") {
+    // Windows no tiene Dock: el ícono dinámico va en la bandeja del sistema; clic abre el panel, clic derecho el menú.
+    tray = new Tray((await drawDockIcon(iconParamsNow().params)).resize({ width: 32, height: 32, quality: "best" }));
+    tray.setToolTip("Usage Monitor");
+    tray.on("click", showPanel);
   }
   await render(true);
   refreshChrome(true);
@@ -360,5 +371,6 @@ app.whenReady().then(async () => {
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
   app.on("activate", () => { if (Date.now() - startedAt > 4000) showPanel(); });
 });
+app.on("second-instance", () => { if (app.isReady()) showPanel(); });      // abrir la app otra vez (p. ej. desde el menú Inicio) muestra el panel
 app.on("before-quit", () => { quitting = true; store.saveData(serialize()); });
 app.on("window-all-closed", () => { /* la app vive en el Dock aunque no haya ventanas */ });
