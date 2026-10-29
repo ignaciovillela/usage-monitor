@@ -22,7 +22,7 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
 ## Instalar
 
 **Desde un release** (lo más fácil): descarga el zip de tu sistema en [Releases](https://github.com/ignaciovillela/usage-monitor/releases).
-- **macOS (Apple Silicon):** mueve *Usage Monitor.app* a Aplicaciones; la primera vez, clic derecho → *Abrir* (la app no está notarizada).
+- **macOS (Apple Silicon):** descarga el `.dmg`, ábrelo y **arrastra *Usage Monitor* a *Applications***. Como la app no está firmada por un desarrollador de Apple ni notarizada, la primera vez macOS la bloqueará: ábrela una vez y luego ve a *Ajustes del Sistema → Privacidad y seguridad → «Abrir de todos modos»* (en macOS anteriores basta con clic derecho → *Abrir*). El `.dmg` incluye esas instrucciones en «Leer primero.txt».
 - **Windows (x64) — experimental, sin probar en un equipo real:** descomprime y ejecuta `Usage Monitor.exe`. Windows SmartScreen avisará porque la app no está firmada: *Más información → Ejecutar de todos modos*. El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
 
 **Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
@@ -31,10 +31,11 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
 npm install
 npm run build        # macOS: crea dist/Usage Monitor-darwin-<arq>/Usage Monitor.app
 npm run build:win    # Windows (ejecutar en Windows): crea dist/Usage Monitor-win32-x64/
+npm run dmg          # macOS: crea el instalador .dmg a partir de la app compilada
 open "dist/Usage Monitor-darwin-"*/"Usage Monitor.app"   # macOS
 ```
 
-En macOS la app está firmada ad hoc, sin notarizar: la primera vez, clic derecho → *Abrir* (o permítela en Ajustes del sistema → Privacidad y seguridad). Ofrece moverse a `/Applications` y abrirse al iniciar sesión. Los zip de los releases los compila el workflow `release` de GitHub Actions.
+En macOS la app está firmada ad hoc, sin notarizar: la primera vez, clic derecho → *Abrir* (o permítela en Ajustes del sistema → Privacidad y seguridad). Ofrece moverse a `/Applications` y abrirse al iniciar sesión. Los instaladores de los releases (`.dmg` y `.zip` de Windows) los compila el workflow `release` de GitHub Actions.
 
 ### Conectar tu cuenta
 

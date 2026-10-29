@@ -10,7 +10,8 @@
     "backtest": "node tests/run-backtest.js",
     "build": "bash scripts/build-app.sh",
     "build:win": "node scripts/build-win.js",
-    "build:mac": "bash scripts/build-app.sh"
+    "build:mac": "bash scripts/build-app.sh",
+    "dmg": "bash scripts/make-dmg.sh \"dist/Usage Monitor-darwin-$(uname -m)/Usage Monitor.app\" \"dist/Usage-Monitor-macos-$(uname -m).dmg\""
   },
   "license": "MIT",
   "private": true,
