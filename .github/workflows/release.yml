@@ -1,5 +1,5 @@
 name: release
-# Al publicar un release, compila la app para macOS (Apple Silicon) y Windows (x64) y adjunta los zip.
+# Al publicar un release, compila la app para macOS (Apple Silicon, instalador .dmg) y Windows (x64, .zip) y los adjunta.
 # En los PR que tocan el empaquetado solo compila (sin adjuntar nada), para detectar roturas antes de publicar.
 on:
   release:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag al que adjuntar los zip (vacío: solo compilar y dejar los zip como artefactos)"
+        description: "Tag al que adjuntar los instaladores (vacío: solo compilar y dejarlos como artefactos)"
         required: false
 
 permissions:
@@ -40,9 +40,9 @@ jobs:
       - run: npm ci
       - run: npm run ${{ matrix.script }}
 
-      - name: Zip (macOS)
+      - name: Instalador .dmg (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent "dist/Usage Monitor-darwin-arm64/Usage Monitor.app" "dist/Usage-Monitor-${TAG}-macos-arm64.zip"
+        run: bash scripts/make-dmg.sh "dist/Usage Monitor-darwin-arm64/Usage Monitor.app" "dist/Usage-Monitor-${TAG}-macos-arm64.dmg"
       - name: Zip (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: usage-monitor-${{ matrix.name }}
-          path: dist/Usage-Monitor-*.zip
+          path: dist/Usage-Monitor-*
           if-no-files-found: error
 
       - name: Adjuntar al release
@@ -59,4 +59,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/Usage-Monitor-*.zip --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist/Usage-Monitor-* --clobber --repo "$GITHUB_REPOSITORY"
