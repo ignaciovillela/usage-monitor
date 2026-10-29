@@ -46,7 +46,7 @@ Personas que usan Claude Code de forma intensiva en macOS y quieren administrar 
 ### 5.3 Panel (clic en el ícono)
 - Cifra principal y titular («43 % de probabilidad de agotarlo · mediana 12:58 · rango 12:24–13:28»), línea que explica el veredicto.
 - Gráficos, cada uno con vista de tabla: proyección de la ventana (uso real, mediana, banda del 80 %, hora de agotamiento), consumo por hora, picos por ventana y uso semanal con el tiempo transcurrido.
-- Ajustes del ícono con vista previa; exportación a CSV (lecturas y semanal).
+- Ajustes del ícono con vista previa; exportación a CSV (lecturas y semanal) e **importación de CSV** (lecturas, bloques o semanal) que se fusiona con los datos actuales sin borrarlos, es idempotente y reajusta el modelo.
 - Alertas de macOS: 80 %, 90 % y aviso anticipado, una vez por ventana, cuando el agotamiento es probable y cercano.
 
 ### 5.4 Motor de proyección

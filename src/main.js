@@ -6,6 +6,7 @@ const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
 const store = require("./store");
+const importer = require("./importer");
 
 const SELFTEST = process.argv.includes("--selftest");
 const MAKE_ICON = process.argv.includes("--make-icon");   // genera build/icon-1024.png para el .icns de la app
@@ -237,7 +238,24 @@ ipcMain.handle("storage-get", (_e, keys) => {
 });
 ipcMain.handle("storage-set", (_e, obj) => { for (const [k, v] of Object.entries(obj || {})) if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v); });
 ipcMain.handle("storage-remove", () => undefined);
-ipcMain.handle("runtime-message", (_e, message) => { if (message && message.type === "POLL_NOW") tick(); return { ok: true }; });
+ipcMain.handle("runtime-message", async (_e, message) => {
+  if (message && message.type === "IMPORT_CSV") return importCsv();
+  if (message && message.type === "POLL_NOW") tick();
+  return { ok: true };
+});
+// Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
+async function importCsv() {
+  const parent = panelWin && !panelWin.isDestroyed() ? panelWin : undefined;
+  const r = await dialog.showOpenDialog(parent, { title: "Importar historial", properties: ["openFile", "multiSelections"], filters: [{ name: "CSV", extensions: ["csv"] }] });
+  if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const { persisted: merged, summary } = importer.mergeImport(persisted, r.filePaths);
+    persisted = merged;
+    store.saveData(serialize());
+    render(true); refreshChrome(); notifyPanel();
+    return { ok: true, summary };
+  } catch (e) { return { ok: false, error: e.message || String(e) }; }
+}
 function showLogin() { if (win) { win.show(); win.focus(); } }
 
 // ── Ventanas ────────────────────────────────────────────────────────────────

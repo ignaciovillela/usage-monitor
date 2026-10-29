@@ -13,7 +13,7 @@ English summary: a macOS (Dock) and Windows (system tray) app that projects your
 
 - **Ícono dinámico** (se redibuja cada pocos segundos): uso de la ventana, tiempo transcurrido, y un número opcional (veredicto, probabilidad, porcentaje, tiempo hasta el límite o el reinicio). Forma, tamaño, posición y transparencia configurables.
 - **Proyección probabilística:** el consumo llega en ráfagas, así que el modelo simula 400 futuros posibles a partir de tu propio historial (hora del día, duración de las sesiones, tamaño de los pasos) y entrega P(llegar al 100 %), la hora mediana y un rango del 80 %. El veredicto tiene histéresis para no parpadear, y se recalibra solo con ≥ 12 ventanas cerradas.
-- **Panel:** proyección de la ventana con banda, consumo por hora, picos por ventana, uso semanal con tiempo transcurrido; cada gráfico con vista de tabla. Exporta CSV.
+- **Panel:** proyección de la ventana con banda, consumo por hora, picos por ventana, uso semanal con tiempo transcurrido; cada gráfico con vista de tabla. Exporta e **importa CSV** (Ajustes → Importar CSV): sirve para llevar tu historial a otro equipo o recuperarlo; se fusiona con lo que ya hay, sin borrar nada, y acepta los CSV de lecturas, bloques y semanal.
 - **Alertas** como notificaciones de macOS (80 %, 90 % y aviso anticipado).
 - **Local:** sin servidor ni telemetría; no lee ni guarda conversaciones.
 
