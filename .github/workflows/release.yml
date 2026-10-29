@@ -1,0 +1,62 @@
+name: release
+# Al publicar un release, compila la app para macOS (Apple Silicon, instalador .dmg) y Windows (x64, .zip) y los adjunta.
+# En los PR que tocan el empaquetado solo compila (sin adjuntar nada), para detectar roturas antes de publicar.
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - "src/**"
+      - "renderer/**"
+      - "scripts/**"
+      - "package.json"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag al que adjuntar los instaladores (vacío: solo compilar y dejarlos como artefactos)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-latest, script: "build:mac" }
+          - { name: windows-x64, os: windows-latest, script: "build:win" }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag || format('build-{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run ${{ matrix.script }}
+
+      - name: Instalador .dmg (macOS)
+        if: runner.os == 'macOS'
+        run: bash scripts/make-dmg.sh "dist/Usage Monitor-darwin-arm64/Usage Monitor.app" "dist/Usage-Monitor-${TAG}-macos-arm64.dmg"
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/Usage Monitor-win32-x64" -DestinationPath "dist/Usage-Monitor-$env:TAG-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usage-monitor-${{ matrix.name }}
+          path: dist/Usage-Monitor-*
+          if-no-files-found: error
+
+      - name: Adjuntar al release
+        if: github.event_name == 'release' || inputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/Usage-Monitor-* --clobber --repo "$GITHUB_REPOSITORY"

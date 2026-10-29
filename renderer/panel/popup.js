@@ -473,6 +473,7 @@ function renderAll() {
   renderSummary();
   renderChart();
 }
+const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
   const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
@@ -550,6 +551,20 @@ $("export").addEventListener("click", () => {
   a.download = `usage-monitor-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$("import").addEventListener("click", () => {
+  const status = $("import-status");
+  status.textContent = "Elige uno o más CSV exportados desde Ajustes (lecturas, bloques o semanal)…";
+  chrome.runtime.sendMessage({ type: "IMPORT_CSV" }, r => {
+    void chrome.runtime.lastError;
+    if (!r || r.canceled) { status.textContent = ""; return; }
+    if (!r.ok) { status.textContent = `No se pudo importar: ${r.error || "error desconocido"}.`; return; }
+    const s = r.summary, parts = [];
+    if (s.lecturas) parts.push(`${s.lecturas} lecturas (${fmtDay(s.desde)} – ${fmtDay(s.hasta)})`);
+    if (s.bloques && !s.lecturas) parts.push(`${s.bloques} bloques`);
+    if (s.semanal) parts.push(`${s.semanal} ciclos semanales`);
+    status.textContent = `Importado: ${parts.join(", ")}. El modelo se reajustó con el historial resultante.`;
+  });
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && (changes[STATE_KEY] || changes[SAMPLES_KEY])) load();

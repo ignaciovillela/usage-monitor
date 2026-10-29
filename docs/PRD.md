@@ -1,10 +1,10 @@
-# PRD — Usage Monitor (app de macOS)
+# PRD — Usage Monitor (app de escritorio)
 
 Versión 3.0 · Proyecto de código abierto, **no oficial y sin relación con Anthropic**.
 
 ## 1. Resumen
 
-Usage Monitor responde, sin abrir nada, una pregunta: **¿me voy a quedar sin límite de uso de Claude antes de que se reinicie la ventana de 5 horas?** Es una app de macOS que muestra la respuesta en el ícono del Dock y ofrece un panel con gráficos para el detalle.
+Usage Monitor responde, sin abrir nada, una pregunta: **¿me voy a quedar sin límite de uso de Claude antes de que se reinicie la ventana de 5 horas?** Es una app de escritorio (macOS y Windows) que muestra la respuesta en el ícono del Dock (macOS) o de la bandeja del sistema (Windows) y ofrece un panel con gráficos para el detalle.
 
 ## 2. Problema
 
@@ -46,7 +46,7 @@ Personas que usan Claude Code de forma intensiva en macOS y quieren administrar 
 ### 5.3 Panel (clic en el ícono)
 - Cifra principal y titular («43 % de probabilidad de agotarlo · mediana 12:58 · rango 12:24–13:28»), línea que explica el veredicto.
 - Gráficos, cada uno con vista de tabla: proyección de la ventana (uso real, mediana, banda del 80 %, hora de agotamiento), consumo por hora, picos por ventana y uso semanal con el tiempo transcurrido.
-- Ajustes del ícono con vista previa; exportación a CSV (lecturas y semanal).
+- Ajustes del ícono con vista previa; exportación a CSV (lecturas y semanal) e **importación de CSV** (lecturas, bloques o semanal) que se fusiona con los datos actuales sin borrarlos, es idempotente y reajusta el modelo.
 - Alertas de macOS: 80 %, 90 % y aviso anticipado, una vez por ventana, cuando el agotamiento es probable y cercano.
 
 ### 5.4 Motor de proyección
@@ -89,7 +89,8 @@ Lectura honesta: acierta más y molesta menos, pero **deja pasar algo más de l�
 | Granularidad | El porcentaje llega como entero; la proyección es una estimación estadística. |
 | Aprendizaje | Tras un cambio brusco de hábitos tarda una o dos semanas en reajustarse. |
 | La app debe estar abierta | Solo registra historial mientras corre (por eso se ofrece el inicio automático). |
-| Sin firma de desarrollador | Firma ad hoc; hay que autorizarla en cada Mac. Se compila para tu arquitectura. |
+| **Windows** | Soporte experimental: el ícono dinámico va en la bandeja del sistema (no hay Dock). Compilado por CI y **no probado en un equipo real**; sin firma, así que SmartScreen avisa. Las funciones propias de macOS (mover a Aplicaciones) no existen allí. |
+| Sin firma de desarrollador | macOS: firma ad hoc, hay que autorizarla en cada Mac. Los releases son Apple Silicon (instalador `.dmg` arrastrable); en Intel hay que compilar. Sin certificado de Apple Developer (de pago) y notarización no se puede eliminar el aviso de Gatekeeper: hay que ir a Privacidad y seguridad → «Abrir de todos modos». |
 | Solo español | La interfaz no está traducida. |
 
 ## 8. Privacidad
