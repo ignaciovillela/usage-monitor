@@ -1,6 +1,6 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
@@ -200,11 +200,21 @@ function refreshChrome(force) {
   if (app.dock) app.dock.setMenu(Menu.buildFromTemplate(menuTemplate()));
   if (tray) tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
 }
+// Tamaño de las ventanas: el que se quiere, acotado al área útil de la pantalla (portátiles de poca altura).
+// USAGE_MONITOR_PANEL_SIZE=ANCHOxALTO fuerza un tamaño (para capturas de prueba).
+function fitToScreen(width, height) {
+  const wa = screen.getPrimaryDisplay().workArea;
+  return { width: Math.min(width, Math.max(340, wa.width - 40)), height: Math.min(height, Math.max(420, wa.height - 40)) };
+}
+function panelBounds() {
+  const forced = /^(\d+)x(\d+)$/.exec(process.env.USAGE_MONITOR_PANEL_SIZE || "");
+  return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 900);
+}
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
 function showPanel() {
   if (!panelWin || panelWin.isDestroyed()) {
     panelWin = new BrowserWindow({
-      width: 482, height: 900, useContentSize: true, title: "Usage Monitor", backgroundColor: "#0d0d0d",
+      ...panelBounds(), useContentSize: true, minWidth: 340, minHeight: 420, title: "Usage Monitor", backgroundColor: "#0d0d0d",
       webPreferences: { preload: path.join(__dirname, "panel-preload.js"), contextIsolation: false }
     });
     panelWin.on("closed", () => { panelWin = null; });
@@ -224,6 +234,7 @@ function storageSnapshot() {
     usageState: currentState(), usageSamples: panelSamples(),
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
+    appVersion: app.getVersion(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -261,7 +272,7 @@ function showLogin() { if (win) { win.show(); win.focus(); } }
 // ── Ventanas ────────────────────────────────────────────────────────────────
 function createSessionWindow() {
   const ses = session.fromPartition("persist:claude");      // las cookies de claude.ai se conservan entre ejecuciones
-  win = new BrowserWindow({ width: 1000, height: 760, show: false, title: "claude.ai", webPreferences: { partition: "persist:claude", backgroundThrottling: false } });
+  win = new BrowserWindow({ ...fitToScreen(1000, 760), minWidth: 480, minHeight: 420, show: false, title: "claude.ai", webPreferences: { partition: "persist:claude", backgroundThrottling: false } });
   win.webContents.setWindowOpenHandler(() => ({ action: "allow" }));   // el inicio de sesión con Google abre una ventana
   win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.webContents.on("did-finish-load", () => { if (!busy && !MOCK) setTimeout(tick, 1500); });
