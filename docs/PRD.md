@@ -90,7 +90,7 @@ Lectura honesta: acierta más y molesta menos, pero **deja pasar algo más de l�
 | Aprendizaje | Tras un cambio brusco de hábitos tarda una o dos semanas en reajustarse. |
 | La app debe estar abierta | Solo registra historial mientras corre (por eso se ofrece el inicio automático). |
 | **Windows** | Soporte experimental: el ícono dinámico va en la bandeja del sistema (no hay Dock). Compilado por CI y **no probado en un equipo real**; sin firma, así que SmartScreen avisa. Las funciones propias de macOS (mover a Aplicaciones) no existen allí. |
-| Sin firma de desarrollador | macOS: firma ad hoc, hay que autorizarla en cada Mac. Los releases son Apple Silicon (instalador `.dmg` arrastrable); en Intel hay que compilar. Sin certificado de Apple Developer (de pago) y notarización no se puede eliminar el aviso de Gatekeeper: hay que ir a Privacidad y seguridad → «Abrir de todos modos». |
+| Sin firma de desarrollador | macOS: firma ad hoc, hay que autorizarla en cada Mac. Los releases son Apple Silicon (instalador `.dmg` arrastrable); en Intel hay que compilar. Sin certificado de Apple Developer (de pago) y notarización no se puede eliminar el aviso de Gatekeeper: hay que ir a Privacidad y seguridad → «Abrir de todos modos». El `.dmg` incluye un ayudante (`.command`) que abre la app y, si macOS la bloqueó, abre esa pantalla de Ajustes; no salta la protección. |
 | Solo español | La interfaz no está traducida. |
 
 ## 8. Privacidad
