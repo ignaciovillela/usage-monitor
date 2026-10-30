@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
+const claudeCode = require("./providers/claude-code");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -90,7 +91,7 @@ async function tick() {
   busy = true;
   const now = Date.now();
   try {
-    const usage = MOCK ? MOCK.next() : await fetchUsageViaPage();
+    const usage = MOCK ? MOCK.next() : settings.source === "claude-code" ? claudeCode.readFeed(claudeCode.feedFile(), now) : await fetchUsageViaPage();
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
     if (loginShown && win && win.isVisible()) win.hide();      // ya hay datos: la ventana de inicio de sesión se oculta sola
@@ -101,7 +102,7 @@ async function tick() {
     errors++;
     persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", error: e.message || String(e), updatedAt: now };
     // Sin sesión, o dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
-    if ((e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
+    if (settings.source !== "claude-code" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
   } finally {
     busy = false;
     await render(true);
@@ -173,6 +174,7 @@ function updateSetting(key, value) {
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
+  if (key === "source") { errors = 0; loginShown = false; if (value === "web" && !win) createSessionWindow(); tick(); }
   render(true); refreshChrome(true);
 }
 function menuTemplate() {
@@ -185,6 +187,8 @@ function menuTemplate() {
     { label: "Forma del ícono", submenu: radio([["Dos anillos", "rings"], ["Donut + anillo de tiempo", "donut"], ["Torta 1 (uso)", "pie1"], ["Torta 2 (uso + anillo de tiempo)", "pie2"], ["Torta 3 (uso + torta de tiempo)", "pie3"]], settings.shape, v => updateSetting("shape", v)) },
     { label: "Qué muestra el número", submenu: radio([["Veredicto (solo si hay riesgo)", "pace"], ["Probabilidad de agotarlo", "prob"], ["Porcentaje de uso", "percent"], ["Tiempo hasta el límite", "limit"], ["Tiempo hasta el reinicio", "reset"]], settings.mode, v => updateSetting("mode", v)) },
     { label: "Transparencia del número", submenu: radio([["30 %", 0.3], ["50 %", 0.5], ["70 %", 0.7], ["90 %", 0.9], ["100 %", 1]], settings.alpha, v => updateSetting("alpha", v)) },
+    { label: "Fuente de datos", submenu: radio([["claude.ai (ventana propia)", "web"], ["Claude Code (línea de estado)", "claude-code"]], settings.source, v => updateSetting("source", v)) },
+    { label: "Conectar con Claude Code…", click: connectClaudeCode },
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
     { type: "separator" },
     { label: "Alertas", type: "checkbox", checked: settings.alerts, click: m => updateSetting("alerts", m.checked) },
@@ -266,6 +270,17 @@ async function importCsv() {
     render(true); refreshChrome(); notifyPanel();
     return { ok: true, summary };
   } catch (e) { return { ok: false, error: e.message || String(e) }; }
+}
+// No se edita ~/.claude/settings.json por el usuario: se instala el script y se le muestra la línea a pegar (con o sin línea de estado previa).
+async function connectClaudeCode() {
+  const script = claudeCode.installScript();
+  const snippet = JSON.stringify({ statusLine: { type: "command", command: script } }, null, 2);
+  const r = await dialog.showMessageBox({
+    type: "info", buttons: ["Copiar configuración", "Cerrar"], defaultId: 0, cancelId: 1, title: "Conectar con Claude Code",
+    message: "Añade esto a ~/.claude/settings.json",
+    detail: `${snippet}\n\nSi ya tienes una línea de estado, pon tu comando a continuación del script y se conservará:\n"command": "${script} <tu comando>"\n\nSolo funciona con planes Pro y Max, y los datos llegan tras la primera respuesta de cada sesión de Claude Code.`
+  });
+  if (r.response === 0) require("electron").clipboard.writeText(snippet);
 }
 function showLogin() { if (win) { win.show(); win.focus(); } }
 
@@ -394,7 +409,8 @@ app.whenReady().then(async () => {
   }
   await render(true);
   refreshChrome(true);
-  if (MOCK) tick(); else createSessionWindow();
+  if (MOCK || settings.source === "claude-code") tick();
+  if (!MOCK && settings.source !== "claude-code") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
