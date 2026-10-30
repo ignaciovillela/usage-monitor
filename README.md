@@ -9,6 +9,14 @@ App de macOS y Windows que lee tu uso de Claude, lo **proyecta hasta el reinicio
 
 English summary: a macOS (Dock) and Windows (system tray) app that projects your Claude usage until the 5-hour window resets (probability of hitting the limit, median time, 80 % range) and shows it in the Dock icon. Unofficial; it reads an undocumented claude.ai endpoint with your own session. UI is Spanish-only for now; see [CONTRIBUTING](CONTRIBUTING.md).
 
+## Instalación rápida (macOS, Apple Silicon)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-mac.sh | bash
+```
+
+Instala la última versión en *Aplicaciones* sin avisos de macOS. Al abrirla, el panel te ofrece conectarla con Claude Code. Más opciones (Windows, `.dmg`, código fuente) en [Instalar](#instalar).
+
 ## Qué hace
 
 - **Ícono dinámico** (se redibuja cada pocos segundos): uso de la ventana, tiempo transcurrido, y un número opcional (veredicto, probabilidad, porcentaje, tiempo hasta el límite o el reinicio). Forma, tamaño, posición y transparencia configurables.
@@ -42,18 +50,19 @@ open "dist/Usage Monitor-darwin-"*/"Usage Monitor.app"   # macOS
 
 En macOS la app está firmada ad hoc, sin notarizar: la primera vez, clic derecho → *Abrir* (o permítela en Ajustes del sistema → Privacidad y seguridad). Ofrece moverse a `/Applications` y abrirse al iniciar sesión. Los instaladores de los releases (`.dmg` y `.zip` de Windows) los compila el workflow `release` de GitHub Actions.
 
-### Fuente de datos: Claude Code (sin iniciar sesión en la app)
+### Fuente de datos: Claude Code (por defecto, sin iniciar sesión en la app)
 
-Si usas Claude Code con un plan **Pro o Max**, la app puede leer tus límites de uso desde su [línea de estado](https://code.claude.com/docs/en/statusline), que recibe `rate_limits.five_hour` y `rate_limits.seven_day`. Así no se maneja ninguna sesión, cookie ni token: solo los números que Claude Code ya calcula.
+Si usas Claude Code con un plan **Pro o Max**, la app lee tus límites de uso desde su [línea de estado](https://code.claude.com/docs/en/statusline), que recibe `rate_limits.five_hour` y `rate_limits.seven_day`. No se maneja ninguna sesión, cookie ni token: solo los números que Claude Code ya calcula.
 
-1. Menú del Dock › **Fuente de datos › Claude Code (línea de estado)**.
-2. Menú del Dock › **Conectar con Claude Code…**: instala `~/.usage-monitor/statusline-feed.sh` y muestra la configuración que debes añadir a `~/.claude/settings.json` (no se edita por ti). Si ya tienes una línea de estado, pon tu comando a continuación del script y se conserva.
+Al abrir la app por primera vez, el panel muestra la tarjeta **«Conecta Usage Monitor con Claude Code»**. Pulsa *Conectar con Claude Code* y confirma: la app instala `~/.usage-monitor/statusline-feed.sh` y añade la clave `statusLine` a `~/.claude/settings.json`, guardando antes una copia de respaldo con fecha. Si ya tenías una línea de estado, se conserva (el script la ejecuta después). *Desconectar de Claude Code…* (menú del Dock) lo deja como estaba.
+
+Después abre una sesión **nueva** de Claude Code: la app se actualiza sola cuando llegan los datos. Si prefieres la ventana de claude.ai, usa *Usar claude.ai en su lugar* en la tarjeta o *Fuente de datos* en el menú del Dock.
 
 Limitaciones: Claude Code solo envía los límites tras la primera respuesta de cada sesión, no hay datos mientras no lo uses, y solo cuenta el uso que Claude Code refleja (no verifiqué si incluye el chat de claude.ai). Sin `jq` el script guarda la entrada completa de la línea de estado (ruta de trabajo, modelo, etc.) en un archivo local con permisos 600; con `jq` guarda solo `rate_limits`.
 
 ### Conectar tu cuenta (fuente claude.ai)
 
-Al abrir la app por primera vez se muestra una ventana de **claude.ai**: inicia sesión ahí. La sesión se conserva entre ejecuciones y la ventana se oculta sola cuando hay datos. Se vuelve a mostrar si la sesión caduca, si claude.ai no carga o tras dos fallos seguidos; también desde el menú del Dock (*Ventana de claude.ai…*).
+Si eliges esta fuente, al abrir la app se muestra una ventana de **claude.ai**: inicia sesión ahí. La sesión se conserva entre ejecuciones y la ventana se oculta sola cuando hay datos. Se vuelve a mostrar si la sesión caduca, si claude.ai no carga o tras dos fallos seguidos; también desde el menú del Dock (*Ventana de claude.ai…*).
 
 Si claude.ai muestra una verificación («comprobando que eres humano»), complétala en esa ventana. **La app no oculta que es una ventana embebida ni intenta saltarse ninguna protección.** Si el sitio no permite iniciar sesión en un navegador embebido (por ejemplo con ciertos proveedores de identidad o verificaciones), la app no podrá leer tu uso; esto no se ha validado con todas las cuentas y es la principal limitación conocida.
 

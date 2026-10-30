@@ -76,6 +76,11 @@ button:focus-visible, select:focus-visible, svg:focus-visible, input:focus-visib
 .weekly-row { display: grid; grid-template-columns: 96px 1fr 44px; gap: 10px; align-items: center; font-size: 12px; }
 .weekly-row .meter { margin: 0; height: 8px; }
 .weekly-row .value { text-align: right; font-weight: 600; }
+.connect { border: 1px solid var(--series-1); border-radius: 10px; padding: 11px 13px; margin-bottom: 10px; }
+.connect h2 { font-size: 14px; margin: 0 0 4px; }
+.connect p { margin: 0 0 9px; color: var(--ink-2); }
+.connect-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.text-btn.primary { background: #1a5fb4; border-color: #1a5fb4; color: #fff; font-weight: 650; }
 .error { color: var(--ink); border: 1px solid var(--critical); border-radius: 10px; padding: 9px 11px; margin-bottom: 10px; overflow-wrap: anywhere; }
 .error::before { content: "⚠ "; color: var(--critical); }
 

@@ -91,6 +91,7 @@ async function tick() {
   busy = true;
   const now = Date.now();
   try {
+    if (settings.source === "claude-code") watchFeed();
     const usage = MOCK ? MOCK.next() : settings.source === "claude-code" ? claudeCode.readFeed(claudeCode.feedFile(), now) : await fetchUsageViaPage();
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
@@ -99,7 +100,7 @@ async function tick() {
     if (settings.alerts) res.events.forEach(notify);
     saveSoon();
   } catch (e) {
-    errors++;
+    if (e.kind !== "nofeed") errors++;      // esperar datos de Claude Code no es un fallo: es una lectura local barata, sin espaciar los intentos
     persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", error: e.message || String(e), updatedAt: now };
     // Sin sesión, o dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
     if (settings.source !== "claude-code" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
@@ -110,6 +111,19 @@ async function tick() {
     notifyPanel();
     schedule();
   }
+}
+// Claude Code escribe el archivo de datos cuando llega una respuesta: se observa la carpeta para actualizar al instante, sin esperar al sondeo.
+let feedWatcher = null, feedWatchTimer = null;
+function watchFeed() {
+  if (feedWatcher || MOCK) return;
+  try {
+    feedWatcher = fs.watch(path.dirname(claudeCode.feedFile()), (_ev, name) => {
+      if (name && name !== path.basename(claudeCode.feedFile())) return;
+      clearTimeout(feedWatchTimer);
+      feedWatchTimer = setTimeout(() => { if (settings.source === "claude-code" && !busy) tick(); }, 400);
+    });
+    feedWatcher.on("error", () => { feedWatcher = null; });
+  } catch (_) { /* la carpeta aún no existe: se reintenta tras conectar y en cada consulta */ }
 }
 // Con errores se espacia la consulta (hasta 5 min) para no insistir contra el servidor.
 function schedule() {
@@ -189,6 +203,7 @@ function menuTemplate() {
     { label: "Transparencia del número", submenu: radio([["30 %", 0.3], ["50 %", 0.5], ["70 %", 0.7], ["90 %", 0.9], ["100 %", 1]], settings.alpha, v => updateSetting("alpha", v)) },
     { label: "Fuente de datos", submenu: radio([["claude.ai (ventana propia)", "web"], ["Claude Code (línea de estado)", "claude-code"]], settings.source, v => updateSetting("source", v)) },
     { label: "Conectar con Claude Code…", click: connectClaudeCode },
+    { label: "Desconectar de Claude Code…", click: disconnectClaudeCode },
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
     { type: "separator" },
     { label: "Alertas", type: "checkbox", checked: settings.alerts, click: m => updateSetting("alerts", m.checked) },
@@ -238,7 +253,7 @@ function storageSnapshot() {
     usageState: currentState(), usageSamples: panelSamples(),
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
-    appVersion: app.getVersion(),
+    appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -256,6 +271,8 @@ ipcMain.handle("storage-remove", () => undefined);
 ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "IMPORT_CSV") return importCsv();
   if (message && message.type === "POLL_NOW") tick();
+  if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
+  if (message && message.type === "SET_SOURCE" && ["claude-code", "web"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -271,16 +288,26 @@ async function importCsv() {
     return { ok: true, summary };
   } catch (e) { return { ok: false, error: e.message || String(e) }; }
 }
-// No se edita ~/.claude/settings.json por el usuario: se instala el script y se le muestra la línea a pegar (con o sin línea de estado previa).
+// Conecta Claude Code con la app: instala el script y añade `statusLine` a ~/.claude/settings.json (con respaldo y confirmación).
 async function connectClaudeCode() {
-  const script = claudeCode.installScript();
-  const snippet = JSON.stringify({ statusLine: { type: "command", command: script } }, null, 2);
-  const r = await dialog.showMessageBox({
-    type: "info", buttons: ["Copiar configuración", "Cerrar"], defaultId: 0, cancelId: 1, title: "Conectar con Claude Code",
-    message: "Añade esto a ~/.claude/settings.json",
-    detail: `${snippet}\n\nSi ya tienes una línea de estado, pon tu comando a continuación del script y se conservará:\n"command": "${script} <tu comando>"\n\nSolo funciona con planes Pro y Max, y los datos llegan tras la primera respuesta de cada sesión de Claude Code.`
-  });
-  if (r.response === 0) require("electron").clipboard.writeText(snippet);
+  const file = claudeCode.settingsFile();
+  const box = (message, detail, buttons = ["Aceptar"]) => dialog.showMessageBox({ type: "info", title: "Conectar con Claude Code", message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 });
+  try {
+    if (claudeCode.isConnected(file)) return void await box("Claude Code ya está conectado.", "Los datos llegan tras la primera respuesta de cada sesión de Claude Code (planes Pro y Max).");
+    const r = await box("¿Conectar Usage Monitor con Claude Code?",
+      `Se añadirá una línea de estado a ${file} (antes se guarda una copia de respaldo con fecha). El script solo guarda tus límites de uso en ~/.usage-monitor; no usa red ni toca tu inicio de sesión. Si ya tenías una línea de estado, se conserva.\n\nSolo funciona con planes Pro y Max, y los datos llegan tras la primera respuesta de cada sesión.`, ["Conectar", "Cancelar"]);
+    if (r.response !== 0) return;
+    const res = claudeCode.connect(file);
+    updateSetting("source", "claude-code");
+    await box("Conectado.", `${res.status === "wrap" ? "Tu línea de estado anterior se conserva. " : ""}Respaldo: ${res.backup || "no hacía falta (el archivo no existía)"}\n\nAbre o usa una sesión nueva de Claude Code para ver los datos.`);
+    notifyPanel();
+  } catch (e) { dialog.showErrorBox("No se pudo conectar con Claude Code", e.message); }
+}
+async function disconnectClaudeCode() {
+  try {
+    const res = claudeCode.disconnect();
+    await dialog.showMessageBox({ type: "info", message: res.status === "removed" ? "Desconectado." : "No estaba conectado.", detail: res.backup ? `Respaldo: ${res.backup}` : "", buttons: ["Aceptar"] });
+  } catch (e) { dialog.showErrorBox("No se pudo desconectar", e.message); }
 }
 function showLogin() { if (win) { win.show(); win.focus(); } }
 
@@ -410,6 +437,8 @@ app.whenReady().then(async () => {
   await render(true);
   refreshChrome(true);
   if (MOCK || settings.source === "claude-code") tick();
+  // Primera vez con Claude Code como fuente y sin conectar: se ofrece conectarlo una sola vez.
+  if (!MOCK && settings.source === "claude-code" && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
   if (!MOCK && settings.source !== "claude-code") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   firstRunSetup();
