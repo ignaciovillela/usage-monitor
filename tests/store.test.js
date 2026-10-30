@@ -6,7 +6,9 @@ const path = require("path");
 
 // store.js lee electron.app.getPath: se simula con un módulo mínimo para probar loadSettings sin Electron.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "um-store-"));
-require.cache[require.resolve("electron")] = { id: "electron", filename: "electron", loaded: true, exports: { app: { getPath: () => dir } } };
+const Module = require("module");
+const load = Module._load;
+Module._load = function (request, ...rest) { return request === "electron" ? { app: { getPath: () => dir } } : load.call(this, request, ...rest); };
 const store = require("../src/store");
 
 test("ajustes heredados con source desconocido vuelven al valor por defecto y conservan el resto", () => {
