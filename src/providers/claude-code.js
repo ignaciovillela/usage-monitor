@@ -6,8 +6,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const FEED_DIR = path.join(os.homedir(), ".usage-monitor");
-const feedFile = () => process.env.USAGE_MONITOR_FEED || path.join(FEED_DIR, "claude-code.json");
+const feedDir = () => process.env.USAGE_MONITOR_FEED_DIR || path.join(os.homedir(), ".usage-monitor");   // se puede cambiar para pruebas
+const feedFile = () => process.env.USAGE_MONITOR_FEED || path.join(feedDir(), "claude-code.json");
 
 function feedError(message) { const e = new Error(message); e.kind = "nofeed"; return e; }
 
@@ -37,7 +37,7 @@ function parseFeed(data, now) {
 function readFeed(file, now) {
   let text;
   try { text = fs.readFileSync(file, "utf8"); }
-  catch (_) { throw feedError("Falta conectar Claude Code: menú › «Conectar con Claude Code…»."); }
+  catch (_) { throw feedError("Todavía no llegan datos de Claude Code. Se reciben tras la primera respuesta de una sesión nueva (solo planes Pro y Max)."); }
   let data;
   try { data = JSON.parse(text); } catch (_) { throw feedError("El archivo de Claude Code no es JSON válido."); }
   return parseFeed(data, now);
@@ -63,11 +63,77 @@ if printf '%s' "$IN" | grep -q '"rate_limits"'; then
 fi
 if [ $# -gt 0 ]; then printf '%s' "$IN" | sh -c "$*"; fi
 `;
-const scriptFile = () => path.join(FEED_DIR, "statusline-feed.sh");
+const scriptFile = () => path.join(feedDir(), "statusline-feed.sh");
 function installScript() {
-  fs.mkdirSync(FEED_DIR, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(feedDir(), { recursive: true, mode: 0o700 });
   fs.writeFileSync(scriptFile(), FEED_SCRIPT, { mode: 0o700 });
   return scriptFile();
 }
 
-module.exports = { readFeed, parseFeed, feedFile, installScript, scriptFile, FEED_SCRIPT };
+// ── Conexión: añade/quita `statusLine` en ~/.claude/settings.json (con respaldo y sin tocar nada más) ─────
+const settingsFile = () => process.env.USAGE_MONITOR_CLAUDE_SETTINGS || path.join(os.homedir(), ".claude", "settings.json");
+const quoted = file => `"${file}"`;
+function readSettings(file) {
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  if (!text.trim()) return { text, data: {} };
+  let data;
+  try { data = JSON.parse(text); } catch (_) { throw new Error(`${file} no es JSON válido; no se modificó.`); }
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`${file} tiene un formato inesperado; no se modificó.`);
+  return { text, data };
+}
+// Si el comando ya es el nuestro (solo o envolviendo otro), devuelve el comando original ("" si no había).
+function unwrap(command, script) {
+  const head = quoted(script);
+  if (typeof command !== "string") return null;
+  if (command === head) return "";
+  if (command.startsWith(head + " ")) return command.slice(head.length + 1);
+  return null;
+}
+// Calcula el cambio sin escribir nada. Devuelve { next, status } con status: "new" | "wrap" | "connected".
+function planConnect(data, script) {
+  const cur = data.statusLine;
+  if (cur === undefined) return { status: "new", next: { ...data, statusLine: { type: "command", command: quoted(script) } } };
+  if (!cur || cur.type !== "command" || typeof cur.command !== "string") throw new Error("Tu statusLine actual no es de tipo «command»; conéctala a mano para no romperla.");
+  if (unwrap(cur.command, script) !== null) return { status: "connected", next: data };
+  return { status: "wrap", previous: cur.command, next: { ...data, statusLine: { ...cur, command: `${quoted(script)} ${cur.command}` } } };
+}
+function planDisconnect(data, script) {
+  const cur = data.statusLine;
+  const prev = cur && unwrap(cur.command, script);
+  if (prev === null || prev === undefined) return { status: "absent", next: data };
+  const next = { ...data };
+  if (prev === "") delete next.statusLine; else next.statusLine = { ...cur, command: prev };
+  return { status: "removed", next };
+}
+function writeSettings(file, previousText, next, now = new Date()) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  let backup = null;
+  if (previousText.trim()) {
+    const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..*/, "");
+    backup = `${file}.usage-monitor-${stamp}.bak`;
+    fs.writeFileSync(backup, previousText, { mode: 0o600 });
+  }
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n");
+  fs.renameSync(tmp, file);
+  return backup;
+}
+function connect(file = settingsFile()) {
+  const script = installScript();
+  const { text, data } = readSettings(file);
+  const plan = planConnect(data, script);
+  const backup = plan.status === "connected" ? null : writeSettings(file, text, plan.next);
+  return { status: plan.status, previous: plan.previous || null, backup, file };
+}
+function disconnect(file = settingsFile()) {
+  const { text, data } = readSettings(file);
+  const plan = planDisconnect(data, scriptFile());
+  const backup = plan.status === "removed" ? writeSettings(file, text, plan.next) : null;
+  return { status: plan.status, backup, file };
+}
+function isConnected(file = settingsFile()) {
+  try { const { data } = readSettings(file); return fs.existsSync(scriptFile()) && !!data.statusLine && unwrap(data.statusLine.command, scriptFile()) !== null; } catch (_) { return false; }
+}
+
+module.exports = { readFeed, parseFeed, feedFile, installScript, scriptFile, FEED_SCRIPT, settingsFile, planConnect, planDisconnect, connect, disconnect, isConnected };

@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -491,8 +491,11 @@ async function load() {
     : "Precisión del modelo: aún no hay ventanas cerradas suficientes para medirla.";
   $("alerts").checked = data[ALERTS_KEY] !== false;
   $("badge-mode").value = data[BADGE_KEY] || "pace";
+  // Con Claude Code como fuente y sin conectar, la tarjeta ofrece conectar desde el propio panel.
+  $("connect").hidden = !(data.dataSource === "claude-code" && !data.claudeCodeConnected && model.state.status !== "connected");
   $("app-version").textContent = data.appVersion ? `Usage Monitor v${data.appVersion}` : "";
   renderAll();
+  if (!$("connect").hidden) $("error").hidden = true;      // la tarjeta ya explica qué falta
   renderIconPreview();
 }
 function pollNow() {
@@ -553,6 +556,8 @@ $("export").addEventListener("click", () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
+$("connect-btn").addEventListener("click", () => chrome.runtime.sendMessage({ type: "CONNECT_CLAUDE_CODE" }, () => { void chrome.runtime.lastError; load(); }));
+$("use-web").addEventListener("click", () => chrome.runtime.sendMessage({ type: "SET_SOURCE", value: "web" }, () => { void chrome.runtime.lastError; load(); }));
 $("import").addEventListener("click", () => {
   const status = $("import-status");
   status.textContent = "Elige uno o más CSV exportados desde Ajustes (lecturas, bloques o semanal)…";
