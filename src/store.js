@@ -6,7 +6,7 @@ const { app } = require("electron");
 const dataFile = () => path.join(app.getPath("userData"), "usage-data.json");
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
 
-const DEFAULT_SETTINGS = { shape: "donut", mode: "pace", alpha: 0.7, pollSeconds: 20, alerts: true, numScale: 1, numDx: 0, numDy: 0 };
+const DEFAULT_SETTINGS = { shape: "donut", mode: "pace", alpha: 0.7, pollSeconds: 20, source: "web", alerts: true, numScale: 1, numDx: 0, numDy: 0 };
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (_) { return fallback; }

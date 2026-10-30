@@ -1,6 +1,6 @@
 {
   "name": "usage-monitor",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Tray/Dock icon that shows your Claude usage and projects it until the window resets (macOS and Windows).",
   "main": "src/main.js",
   "scripts": {
