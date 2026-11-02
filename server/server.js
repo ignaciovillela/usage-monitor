@@ -90,8 +90,11 @@ function createMonitor(config, log = console) {
   };
 }
 
+// API_TOKEN es obligatorio; "none" lo desactiva a propósito (red de confianza). Sin token configurado no se acepta nada.
+const NO_TOKEN = "none";
 function authorized(req, token) {
-  if (!token) return true;
+  if (token === NO_TOKEN) return true;
+  if (!token) return false;
   const got = Buffer.from(String(req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
   const want = Buffer.from(token);
   return got.length === want.length && crypto.timingSafeEqual(got, want);
@@ -119,7 +122,12 @@ function createServer(monitor, config) {
 if (require.main === module) {
   const config = readConfig();
   if (!config.sessionKey) { console.error("Falta CLAUDE_SESSION_KEY (o CLAUDE_SESSION_KEY_FILE)."); process.exit(1); }
-  if (!config.apiToken) console.warn("Aviso: sin API_TOKEN, cualquiera en tu red puede leer /usage.");
+  if (!config.apiToken) {
+    console.error("Falta API_TOKEN. Genera uno en la app (Ajustes y datos → Servidor propio → «Generar» → «Copiar») y pega la línea en .env.");
+    console.error("Para no usar token (solo en una red de confianza), pon API_TOKEN=none.");
+    process.exit(1);
+  }
+  if (config.apiToken === NO_TOKEN) console.warn("Aviso: API_TOKEN=none; cualquiera que alcance este puerto puede leer /usage y forzar consultas.");
   const monitor = createMonitor(config);
   const server = createServer(monitor, config);
   server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor v${VERSION} en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));

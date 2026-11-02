@@ -8,14 +8,15 @@ Es opcional: la app funciona sin él con Claude Code o con su propia ventana de 
 
 ## Puesta en marcha (Docker Compose)
 
-La imagen está en `ghcr.io/ignaciovillela/usage-monitor-server` (amd64 y arm64; se publica con cada release).
+La imagen está en `ghcr.io/ignaciovillela/usage-monitor-server` (amd64 y arm64): `latest` y `X.Y.Z` con cada release,
+`dev` con cada cambio en la rama dev (para probar; cambia `:latest` por `:dev` en el compose).
 En el servidor solo necesitas `docker-compose.yml` y tu `.env`:
 
 ```sh
 mkdir usage-monitor && cd usage-monitor
 curl -fsSLO https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/docker-compose.yml
 curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/.env.example -o .env
-# edita .env: CLAUDE_SESSION_KEY y la línea API_TOKEN=… que copias desde la app («Generar token»)
+# edita .env: CLAUDE_SESSION_KEY y la línea API_TOKEN=… que copias desde la app («Generar»)
 docker compose up -d
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
 ```
@@ -47,7 +48,7 @@ La app acepta también una URL que devuelva directamente el JSON de claude.ai o 
 ## Seguridad y límites
 
 - `CLAUDE_SESSION_KEY` da acceso a tu cuenta. Queda solo en el servidor; la app nunca la ve.
-- Pon `API_TOKEN` y no expongas el puerto a internet (usa tu VPN o red local).
+- `API_TOKEN` es obligatorio: sin él el servidor no arranca. `API_TOKEN=none` lo desactiva a propósito; úsalo solo en una red de confianza y nunca con la URL online.
 - La sesión caduca: `/usage` devolverá `error` y la app lo mostrará. Renueva la cookie y reinicia el contenedor.
 - claude.ai está detrás de Cloudflare; si bloquea las consultas desde tu IP verás «sin JSON (posible verificación de Cloudflare)».
 - Usa un endpoint interno de claude.ai que no está documentado y puede cambiar.

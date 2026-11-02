@@ -80,7 +80,7 @@ test("actualización manual: POST consulta claude.ai al momento, con límite de 
     res.end(JSON.stringify({ ...CLAUDE_AI, five_hour: { ...CLAUDE_AI.five_hour, utilization: 40 + usageCalls } }));
   });
   const base = await listen(upstream);
-  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "", baseUrl: base, refreshMinSeconds: 60 };
+  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "none", baseUrl: base, refreshMinSeconds: 60 };
   const monitor = createMonitor(config, quiet);
   const server = createServer(monitor, config);
   const url = await listen(server);
@@ -136,4 +136,24 @@ test("URL local y online: usa la local, cae a la online si la local no responde,
   await assert.rejects(fetchRemote({ local: dead, online: dead }, "tk"), /No se pudo conectar.*No se pudo conectar/);
   const health = await (await fetch(`${url}/health`)).json();
   assert.strictEqual(health.version, VERSION);
+});
+
+test("token obligatorio: vacío no deja pasar a nadie, «none» deja pasar a todos", async t => {
+  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "", baseUrl: "http://127.0.0.1:9" };
+  const monitor = createMonitor(config, quiet);
+  monitor.state.fetchedAt = Date.now(); monitor.state.usage = CLAUDE_AI;
+  const server = createServer(monitor, config);
+  const url = await listen(server);
+  t.after(() => { server.close(); monitor.stop(); });
+  await assert.rejects(fetchUsage(`${url}/usage`, ""), /rechazó el token/);
+  await assert.rejects(fetchUsage(`${url}/usage`, "cualquiera"), /rechazó el token/);
+  config.apiToken = "none";
+  assert.strictEqual((await fetchUsage(`${url}/usage`, "")).utilization, 40);
+});
+test("el servidor no arranca sin API_TOKEN y explica cómo generarlo", () => {
+  const { spawnSync } = require("child_process");
+  const r = spawnSync(process.execPath, [require.resolve("../server/server.js")], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", CLAUDE_SESSION_KEY: "sk", API_TOKEN: "", PORT: "0" }, encoding: "utf8", timeout: 10000 });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /Falta API_TOKEN.*Generar/s);
+  assert.match(r.stderr, /API_TOKEN=none/);
 });

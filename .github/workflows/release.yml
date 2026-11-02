@@ -1,9 +1,12 @@
 name: release
 # Al publicar un release, compila la app para macOS (Apple Silicon, instalador .dmg) y Windows (x64, .zip) y los adjunta.
 # En los PR que tocan el empaquetado solo compila (sin adjuntar nada), para detectar roturas antes de publicar.
+# Cada push a dev compila una versión X.Y.Z-dev.N y reemplaza el pre-release «dev» con sus instaladores.
 on:
   release:
     types: [published]
+  push:
+    branches: [dev]
   pull_request:
     paths:
       - "src/**"
@@ -20,9 +23,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   build:
     name: build (${{ matrix.name }})
+    # El pre-release «dev» lo crea este mismo workflow: no se recompila al publicarlo.
+    if: github.event_name != 'release' || github.event.release.tag_name != 'dev'
     strategy:
       fail-fast: false
       matrix:
@@ -31,13 +40,17 @@ jobs:
           - { name: windows-x64, os: windows-latest, script: "build:win" }
     runs-on: ${{ matrix.os }}
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag || format('build-{0}', github.run_number) }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag || (github.event_name == 'push' && 'dev') || format('build-{0}', github.run_number) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm ci
+      - name: Versión de desarrollo (push a dev)
+        if: github.event_name == 'push'
+        shell: bash
+        run: npm version "$(node -p "require('./package.json').version")-dev.${{ github.run_number }}" --no-git-tag-version
       - run: npm run ${{ matrix.script }}
 
       - name: Instalador .dmg (macOS)
@@ -60,3 +73,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" dist/Usage-Monitor-* --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Push a dev: reemplaza el pre-release «dev» (tag movible) con los instaladores de este commit.
+  dev-release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Pre-release dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_number }}
+        run: |
+          gh release delete dev --repo "$REPO" --cleanup-tag --yes || true
+          gh release create dev dist/Usage-Monitor-* --repo "$REPO" --target "$SHA" --prerelease --title "dev (build $RUN)"             --notes "Compilación automática de la rama dev (${SHA:0:7}). No es estable: úsala para probar. La imagen del servidor es ghcr.io/${REPO,,}-server:dev."
