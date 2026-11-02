@@ -15,7 +15,7 @@ En el servidor solo necesitas `docker-compose.yml` y tu `.env`:
 mkdir usage-monitor && cd usage-monitor
 curl -fsSLO https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/docker-compose.yml
 curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/.env.example -o .env
-# edita .env: CLAUDE_SESSION_KEY y API_TOKEN
+# edita .env: CLAUDE_SESSION_KEY y la línea API_TOKEN=… que copias desde la app («Generar token»)
 docker compose up -d
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
 ```

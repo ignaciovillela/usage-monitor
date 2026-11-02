@@ -1,6 +1,6 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage, shell, clipboard } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
@@ -381,6 +381,8 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
   if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);
+  // Solo se copia la línea del token generado en el panel (nada arbitrario al portapapeles).
+  if (message && message.type === "COPY_TOKEN_LINE" && /^API_TOKEN=[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
   if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
   return { ok: true };
 });

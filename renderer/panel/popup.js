@@ -537,11 +537,30 @@ function saveRemote(extra = {}) {
     void chrome.runtime.lastError;
     $("remote-save").disabled = false;
     $("remote-token").value = "";
+    $("remote-token").type = "password";
+    if (r && r.ok) $("token-env").hidden = true;      // el servidor ya acepta el token: la línea ya está en su .env
     status.textContent = r && r.ok ? "Conectado: datos recibidos del servidor." : `No se pudo leer: ${(r && r.error) || "sin respuesta"}`;
     load();
   });
 }
 $("remote-save").addEventListener("click", () => saveRemote());
+// Token generado aquí: 32 bytes aleatorios en hex. Se muestra la línea para el .env del servidor y se guarda con «Guardar y probar».
+$("remote-gen-token").addEventListener("click", () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  $("remote-token").type = "text";
+  $("remote-token").value = token;
+  $("token-env-line").textContent = `API_TOKEN=${token}`;
+  $("token-env").hidden = false;
+  $("token-copy").textContent = "Copiar";
+  $("remote-status").textContent = "";
+});
+$("token-copy").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "COPY_TOKEN_LINE", text: $("token-env-line").textContent }, r => {
+    void chrome.runtime.lastError;
+    $("token-copy").textContent = r && r.ok ? "Copiado" : "Selecciona y copia";
+  });
+});
 $("remote-clear-token").addEventListener("click", () => saveRemote({ token: "", clearToken: true }));
 $("remote-url").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
 $("remote-url-online").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });

@@ -137,6 +137,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 summary { cursor: pointer; color: var(--ink-2); }
 .field { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 12px 0 8px; }
 select { background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 5px 7px; }
+.token-env { margin: 8px 0 0; }
+.token-line { display: flex; gap: 8px; align-items: center; }
+.token-line code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 11px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); user-select: all; }
 .hint { margin: -2px 0 6px; font-size: 11px; }
 .updates p { margin: 0 0 6px; }
 .remote-fields { margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--grid); }

@@ -88,7 +88,12 @@
         <label class="field"><span>Token</span><input id="remote-token" type="password" placeholder="opcional" autocomplete="off"></label>
         <div class="actions">
           <button id="remote-save" class="text-btn primary">Guardar y probar</button>
+          <button id="remote-gen-token" class="text-btn">Generar token</button>
           <button id="remote-clear-token" class="text-btn" hidden>Quitar token</button>
+        </div>
+        <div id="token-env" class="token-env" hidden>
+          <p class="muted hint">Pega esta línea en el <code>.env</code> del servidor, reinícialo (<code>docker compose up -d</code>) y pulsa «Guardar y probar».</p>
+          <div class="token-line"><code id="token-env-line"></code><button id="token-copy" class="text-btn">Copiar</button></div>
         </div>
         <p id="remote-status" class="muted precision" role="status"></p>
       </div>
