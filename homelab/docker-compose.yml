@@ -1,0 +1,8 @@
+services:
+  usage-monitor:
+    build: .
+    container_name: usage-monitor
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8787:8787"

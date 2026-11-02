@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteTokenSet", "remoteFromEnv"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -493,6 +493,7 @@ async function load() {
   $("badge-mode").value = data[BADGE_KEY] || "pace";
   // Con Claude Code como fuente y sin conectar, la tarjeta ofrece conectar desde el propio panel.
   $("connect").hidden = !(data.dataSource === "claude-code" && !data.claudeCodeConnected && model.state.status !== "connected");
+  renderSource(data);
   $("app-version").textContent = data.appVersion ? `Usage Monitor v${data.appVersion}` : "";
   renderAll();
   if (!$("connect").hidden) $("error").hidden = true;      // la tarjeta ya explica qué falta
@@ -506,6 +507,42 @@ function pollNow() {
     load();
   });
 }
+
+// Fuente de datos. El servidor propio se guarda con su botón (no al teclear) y la URL no se pisa mientras se edita.
+function renderSource(data) {
+  const source = data.dataSource || "claude-code";
+  $("data-source").value = source;
+  $("remote-fields").hidden = source !== "remote";
+  if (document.activeElement !== $("remote-url")) $("remote-url").value = data.remoteUrl || "";
+  $("remote-url").disabled = !!data.remoteFromEnv;
+  $("remote-token").placeholder = data.remoteTokenSet ? "guardado (vacío = mantenerlo)" : "opcional";
+  $("remote-clear-token").hidden = !data.remoteTokenSet || !!data.remoteFromEnv;
+  if (data.remoteFromEnv) $("remote-status").textContent = "La URL viene de USAGE_MONITOR_REMOTE_URL.";
+}
+$("data-source").addEventListener("change", e => {
+  const value = e.target.value;
+  $("remote-fields").hidden = value !== "remote";
+  $("remote-status").textContent = "";
+  // Sin URL guardada, elegir «Servidor propio» solo muestra los campos; se activa al pulsar «Guardar y probar».
+  if (value === "remote" && !$("remote-url").value) { $("remote-url").focus(); return; }
+  chrome.runtime.sendMessage({ type: "SET_SOURCE", value }, () => { void chrome.runtime.lastError; load(); });
+});
+function saveRemote(extra = {}) {
+  const status = $("remote-status");
+  status.textContent = "Probando…";
+  $("remote-save").disabled = true;
+  chrome.runtime.sendMessage({ type: "SET_REMOTE", url: $("remote-url").value, token: $("remote-token").value, ...extra }, r => {
+    void chrome.runtime.lastError;
+    $("remote-save").disabled = false;
+    $("remote-token").value = "";
+    status.textContent = r && r.ok ? "Conectado: datos recibidos del servidor." : `No se pudo leer: ${(r && r.error) || "sin respuesta"}`;
+    load();
+  });
+}
+$("remote-save").addEventListener("click", () => saveRemote());
+$("remote-clear-token").addEventListener("click", () => saveRemote({ token: "", clearToken: true }));
+$("remote-url").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
+$("remote-token").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
 
 $("refresh").addEventListener("click", pollNow);
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => { ui.tab = b.dataset.tab; renderChart(); });

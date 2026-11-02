@@ -73,6 +73,23 @@
     <details class="settings">
       <summary>Ajustes y datos</summary>
       <label class="field">
+        <span>Fuente de datos</span>
+        <select id="data-source">
+          <option value="claude-code">Claude Code (línea de estado)</option>
+          <option value="web">claude.ai (ventana propia)</option>
+          <option value="remote">Servidor propio (URL)</option>
+        </select>
+      </label>
+      <div id="remote-fields" class="remote-fields" hidden>
+        <label class="field"><span>URL</span><input id="remote-url" type="url" placeholder="http://homelab:8787/usage" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Token</span><input id="remote-token" type="password" placeholder="opcional" autocomplete="off"></label>
+        <div class="actions">
+          <button id="remote-save" class="text-btn primary">Guardar y probar</button>
+          <button id="remote-clear-token" class="text-btn" hidden>Quitar token</button>
+        </div>
+        <p id="remote-status" class="muted precision" role="status"></p>
+      </div>
+      <label class="field">
         <span>Qué muestra el número</span>
         <select id="badge-mode">
           <option value="pace">Veredicto: solo avisa si hay riesgo</option>

@@ -1,11 +1,12 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
 const claudeCode = require("./providers/claude-code");
+const remote = require("./providers/remote");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -85,14 +86,45 @@ async function fetchUsageViaPage() {
   return parseUsage(result.data);
 }
 
+// ── Servidor propio: URL y token (el token se cifra con el llavero del sistema si está disponible) ─────────
+// USAGE_MONITOR_REMOTE_URL y USAGE_MONITOR_REMOTE_TOKEN tienen prioridad sobre los ajustes (despliegues sin panel).
+const remoteUrl = () => process.env.USAGE_MONITOR_REMOTE_URL || settings.remoteUrl || "";
+function remoteToken() {
+  if (process.env.USAGE_MONITOR_REMOTE_TOKEN) return process.env.USAGE_MONITOR_REMOTE_TOKEN;
+  const t = settings.remoteToken || "";
+  if (!t.startsWith("enc:")) return t;
+  try { return safeStorage.decryptString(Buffer.from(t.slice(4), "base64")); } catch (_) { return ""; }
+}
+const sealToken = t => !t ? "" : safeStorage.isEncryptionAvailable() ? "enc:" + safeStorage.encryptString(t).toString("base64") : t;
+// Desde el panel: guarda URL y token (token vacío = se mantiene el actual) y pasa a esta fuente con una consulta inmediata.
+async function setRemote({ url, token, clearToken } = {}) {
+  url = String(url || process.env.USAGE_MONITOR_REMOTE_URL || "").trim();
+  if (!remote.validUrl(url)) return { ok: false, error: "La URL debe empezar por http:// o https://." };
+  const next = { ...settings, remoteUrl: url };
+  if (clearToken) next.remoteToken = "";
+  else if (token) next.remoteToken = sealToken(String(token).trim());
+  settings = { ...next, source: "remote" };
+  store.saveSettings(settings);
+  errors = 0; loginShown = false;
+  await tick();
+  const s = persisted.state;
+  return s.status === "connected" ? { ok: true } : { ok: false, error: s.error || "Sin datos todavía." };
+}
+
 // ── Ciclo de consulta ───────────────────────────────────────────────────────
+async function readUsage(now) {
+  if (MOCK) return MOCK.next();
+  if (settings.source === "claude-code") return claudeCode.readFeed(claudeCode.feedFile(), now);
+  if (settings.source === "remote") return remote.fetchUsage(remoteUrl(), remoteToken(), now);
+  return fetchUsageViaPage();
+}
 async function tick() {
   if (busy) return;
   busy = true;
   const now = Date.now();
   try {
     if (settings.source === "claude-code") watchFeed();
-    const usage = MOCK ? MOCK.next() : settings.source === "claude-code" ? claudeCode.readFeed(claudeCode.feedFile(), now) : await fetchUsageViaPage();
+    const usage = await readUsage(now);
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
     if (loginShown && win && win.isVisible()) win.hide();      // ya hay datos: la ventana de inicio de sesión se oculta sola
@@ -100,10 +132,10 @@ async function tick() {
     if (settings.alerts) res.events.forEach(notify);
     saveSoon();
   } catch (e) {
-    if (e.kind !== "nofeed") errors++;      // esperar datos de Claude Code no es un fallo: es una lectura local barata, sin espaciar los intentos
+    if (e.kind !== "nofeed" && e.kind !== "config") errors++;      // esperar datos de Claude Code o la URL del servidor no es un fallo: no se espacian los intentos
     persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", error: e.message || String(e), updatedAt: now };
     // Sin sesión, o dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
-    if (settings.source !== "claude-code" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
+    if (settings.source === "web" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
   } finally {
     busy = false;
     await render(true);
@@ -193,7 +225,12 @@ function updateSetting(key, value) {
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
-  if (key === "source") { errors = 0; loginShown = false; if (value === "web" && !win) createSessionWindow(); tick(); }
+  if (key === "source") {
+    errors = 0; loginShown = false;
+    if (value === "web" && !win) createSessionWindow();
+    if (value === "remote" && !remoteUrl()) showPanel();      // el panel tiene los campos de URL y token
+    tick();
+  }
   render(true); refreshChrome(true);
 }
 function menuTemplate() {
@@ -201,7 +238,7 @@ function menuTemplate() {
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
   // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
   const more = [
-    { label: "Fuente de datos", submenu: radio([["claude.ai (ventana propia)", "web"], ["Claude Code (línea de estado)", "claude-code"]], settings.source, v => updateSetting("source", v)) },
+    { label: "Fuente de datos", submenu: radio([["Claude Code (línea de estado)", "claude-code"], ["claude.ai (ventana propia)", "web"], ["Servidor propio (URL)…", "remote"]], settings.source, v => updateSetting("source", v)) },
     claudeCode.isConnected() ? { label: "Desconectar de Claude Code…", click: disconnectClaudeCode } : { label: "Conectar con Claude Code…", click: connectClaudeCode },
     ...(settings.source === "web" ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
@@ -260,6 +297,7 @@ function storageSnapshot() {
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
     appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
+    remoteUrl: remoteUrl(), remoteTokenSet: !!remoteToken(), remoteFromEnv: !!process.env.USAGE_MONITOR_REMOTE_URL,
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -278,7 +316,8 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "IMPORT_CSV") return importCsv();
   if (message && message.type === "POLL_NOW") tick();
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
-  if (message && message.type === "SET_SOURCE" && ["claude-code", "web"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "SET_REMOTE") return setRemote(message);
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -444,10 +483,10 @@ app.whenReady().then(async () => {
   }
   await render(true);
   refreshChrome(true);
-  if (MOCK || settings.source === "claude-code") tick();
+  if (MOCK || settings.source !== "web") tick();     // claude.ai espera a que cargue su ventana
   // Primera vez con Claude Code como fuente y sin conectar: se ofrece conectarlo una sola vez.
   if (!MOCK && settings.source === "claude-code" && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
-  if (!MOCK && settings.source !== "claude-code") createSessionWindow();
+  if (!MOCK && settings.source === "web") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
