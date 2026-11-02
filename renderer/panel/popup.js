@@ -509,29 +509,38 @@ function pollNow() {
 }
 
 // Fuente de datos. El servidor propio se guarda con su botón (no al teclear) y la URL no se pisa mientras se edita.
+const SOURCE_HINTS = {
+  "claude-code": "Los límites que calcula Claude Code (planes Pro y Max). Sin cookies.",
+  web: "Tu sesión de claude.ai en una ventana de la app. Trae todos los topes semanales.",
+  remote: "Un servidor tuyo que consulta el uso; la app solo lo muestra."
+};
+function showSource(source) {
+  $("data-source").value = source;
+  $("source-hint").textContent = SOURCE_HINTS[source] || "";
+  $("remote-fields").hidden = source !== "remote";
+}
+function setStatus(text, state) { $("remote-status").textContent = text; $("remote-status").dataset.state = state || ""; }
 function renderSource(data) {
   const source = data.dataSource || "claude-code";
-  $("data-source").value = source;
-  $("remote-fields").hidden = source !== "remote";
+  showSource(source);
   for (const [id, key] of [["remote-url", "remoteUrl"], ["remote-url-online", "remoteUrlOnline"]]) {
     if (document.activeElement !== $(id)) $(id).value = data[key] || "";
     $(id).disabled = !!data.remoteFromEnv;
   }
-  $("remote-token").placeholder = data.remoteTokenSet ? "guardado (vacío = mantenerlo)" : "opcional";
+  $("remote-token").placeholder = data.remoteTokenSet ? "guardado ••••••" : "opcional";
   $("remote-clear-token").hidden = !data.remoteTokenSet || !!data.remoteFromEnv;
   if (data.remoteFromEnv) $("remote-status").textContent = "Las URLs vienen de USAGE_MONITOR_REMOTE_URL / USAGE_MONITOR_REMOTE_URL_ONLINE.";
 }
 $("data-source").addEventListener("change", e => {
   const value = e.target.value;
-  $("remote-fields").hidden = value !== "remote";
-  $("remote-status").textContent = "";
+  showSource(value);
+  setStatus("");
   // Sin URL guardada, elegir «Servidor propio» solo muestra los campos; se activa al pulsar «Guardar y probar».
   if (value === "remote" && !$("remote-url").value && !$("remote-url-online").value) { $("remote-url").focus(); return; }
   chrome.runtime.sendMessage({ type: "SET_SOURCE", value }, () => { void chrome.runtime.lastError; load(); });
 });
 function saveRemote(extra = {}) {
-  const status = $("remote-status");
-  status.textContent = "Probando…";
+  setStatus("Probando…");
   $("remote-save").disabled = true;
   chrome.runtime.sendMessage({ type: "SET_REMOTE", url: $("remote-url").value, urlOnline: $("remote-url-online").value, token: $("remote-token").value, ...extra }, r => {
     void chrome.runtime.lastError;
@@ -539,7 +548,7 @@ function saveRemote(extra = {}) {
     $("remote-token").value = "";
     $("remote-token").type = "password";
     if (r && r.ok) $("token-env").hidden = true;      // el servidor ya acepta el token: la línea ya está en su .env
-    status.textContent = r && r.ok ? "Conectado: datos recibidos del servidor." : `No se pudo leer: ${(r && r.error) || "sin respuesta"}`;
+    if (r && r.ok) setStatus("Conectado: datos recibidos.", "ok"); else setStatus(`No se pudo leer: ${(r && r.error) || "sin respuesta"}`, "error");
     load();
   });
 }
@@ -553,7 +562,7 @@ $("remote-gen-token").addEventListener("click", () => {
   $("token-env-line").textContent = `API_TOKEN=${token}`;
   $("token-env").hidden = false;
   $("token-copy").textContent = "Copiar";
-  $("remote-status").textContent = "";
+  setStatus("");
 });
 $("token-copy").addEventListener("click", () => {
   chrome.runtime.sendMessage({ type: "COPY_TOKEN_LINE", text: $("token-env-line").textContent }, r => {

@@ -73,82 +73,104 @@
 
     <details class="settings">
       <summary>Ajustes y datos</summary>
-      <label class="field">
-        <span>Fuente de datos</span>
-        <select id="data-source">
-          <option value="claude-code">Claude Code (línea de estado)</option>
-          <option value="web">claude.ai (ventana propia)</option>
-          <option value="remote">Servidor propio (URL)</option>
-        </select>
-      </label>
-      <div id="remote-fields" class="remote-fields" hidden>
-        <label class="field"><span>URL local</span><input id="remote-url" type="url" placeholder="http://192.168.1.10:8787/usage" autocomplete="off" spellcheck="false"></label>
-        <label class="field"><span>URL online</span><input id="remote-url-online" type="url" placeholder="opcional: https://mi-servidor.ejemplo/usage" autocomplete="off" spellcheck="false"></label>
-        <p class="muted hint">Se usa la local y, si no responde (fuera de casa), la online. Basta con una de las dos.</p>
-        <label class="field"><span>Token</span><input id="remote-token" type="password" placeholder="opcional" autocomplete="off"></label>
+
+      <section class="group" aria-labelledby="g-source">
+        <h3 id="g-source">Fuente de datos</h3>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Leer el uso desde</span><span id="source-hint" class="row-desc"></span></div>
+          <select id="data-source">
+            <option value="claude-code">Claude Code</option>
+            <option value="web">claude.ai</option>
+            <option value="remote">Servidor propio</option>
+          </select>
+        </div>
+        <div id="remote-fields" class="remote-fields" hidden>
+          <label class="stack">
+            <span class="row-title">URL local</span>
+            <input id="remote-url" type="url" placeholder="http://192.168.1.10:8787/usage" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="stack">
+            <span class="row-title">URL online <em class="opt">opcional</em></span>
+            <input id="remote-url-online" type="url" placeholder="https://mi-servidor.ejemplo/usage" autocomplete="off" spellcheck="false">
+            <span class="row-desc">Se usa la local y, si no responde (fuera de casa), la online. Basta con una de las dos.</span>
+          </label>
+          <div class="stack">
+            <label class="row-title" for="remote-token">Token</label>
+            <div class="input-row">
+              <input id="remote-token" type="password" placeholder="opcional" autocomplete="off" title="Déjalo vacío para mantener el token guardado">
+              <button id="remote-gen-token" class="text-btn">Generar</button>
+              <button id="remote-clear-token" class="text-btn" hidden>Quitar</button>
+            </div>
+          </div>
+          <div id="token-env" class="token-env" hidden>
+            <span class="row-desc">Pega esta línea en el <code>.env</code> del servidor, reinícialo (<code>docker compose up -d</code>) y pulsa «Guardar y probar».</span>
+            <div class="token-line"><code id="token-env-line"></code><button id="token-copy" class="text-btn">Copiar</button></div>
+          </div>
+          <div class="actions">
+            <button id="remote-save" class="text-btn primary">Guardar y probar</button>
+            <p id="remote-status" class="status" role="status"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="group" aria-labelledby="g-icon">
+        <h3 id="g-icon">Ícono</h3>
+        <div class="icon-preview" aria-hidden="true">
+          <div class="pv light"><canvas id="pv-light" width="128" height="128"></canvas><canvas id="pv-light-s" width="32" height="32"></canvas></div>
+          <div class="pv dark"><canvas id="pv-dark" width="128" height="128"></canvas><canvas id="pv-dark-s" width="32" height="32"></canvas></div>
+        </div>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Forma</span></div>
+          <select id="icon-shape">
+            <option value="rings">Dos anillos</option>
+            <option value="donut">Donut + anillo de tiempo</option>
+            <option value="pie1">Torta (uso)</option>
+            <option value="pie2">Torta + anillo de tiempo</option>
+            <option value="pie3">Torta + torta de tiempo</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Número</span><span class="row-desc">Qué se escribe sobre el ícono</span></div>
+          <select id="badge-mode">
+            <option value="pace">Veredicto (solo si hay riesgo)</option>
+            <option value="prob">Probabilidad de agotarlo</option>
+            <option value="percent">Porcentaje de uso</option>
+            <option value="limit">Tiempo hasta el límite</option>
+            <option value="reset">Tiempo hasta el reinicio</option>
+          </select>
+        </div>
+        <details class="sub">
+          <summary>Ajustar el número</summary>
+          <label class="slider"><span>Transparencia</span><input type="range" id="number-alpha" min="15" max="100" step="5"><b id="alpha-value"></b></label>
+          <label class="slider"><span>Tamaño</span><input type="range" id="number-scale" min="50" max="160" step="5"><b id="scale-value"></b></label>
+          <label class="slider"><span>Horizontal</span><input type="range" id="number-dx" min="-30" max="30" step="1"><b id="dx-value"></b></label>
+          <label class="slider"><span>Vertical</span><input type="range" id="number-dy" min="-30" max="30" step="1"><b id="dy-value"></b></label>
+          <div class="actions"><button id="number-reset" class="text-btn">Restablecer</button></div>
+        </details>
+      </section>
+
+      <section class="group" aria-labelledby="g-alerts">
+        <h3 id="g-alerts">Avisos</h3>
+        <label class="row switch-row">
+          <div class="row-text"><span class="row-title">Alertas de uso</span><span class="row-desc">Al 80 %, al 90 % y si el límite llega antes del reinicio</span></div>
+          <input type="checkbox" id="alerts" class="switch">
+        </label>
+        <label class="row switch-row">
+          <div class="row-text"><span class="row-title">Buscar actualizaciones</span><span class="row-desc">De la app y del servidor; consulta los releases en GitHub cada 6 h</span></div>
+          <input type="checkbox" id="update-check" class="switch">
+        </label>
+      </section>
+
+      <section class="group" aria-labelledby="g-data">
+        <h3 id="g-data">Datos</h3>
+        <p id="precision" class="row-desc"></p>
         <div class="actions">
-          <button id="remote-save" class="text-btn primary">Guardar y probar</button>
-          <button id="remote-gen-token" class="text-btn">Generar token</button>
-          <button id="remote-clear-token" class="text-btn" hidden>Quitar token</button>
+          <button id="export" class="text-btn">Exportar CSV</button>
+          <button id="export-weekly" class="text-btn">Exportar semanal</button>
+          <button id="import" class="text-btn">Importar CSV</button>
         </div>
-        <div id="token-env" class="token-env" hidden>
-          <p class="muted hint">Pega esta línea en el <code>.env</code> del servidor, reinícialo (<code>docker compose up -d</code>) y pulsa «Guardar y probar».</p>
-          <div class="token-line"><code id="token-env-line"></code><button id="token-copy" class="text-btn">Copiar</button></div>
-        </div>
-        <p id="remote-status" class="muted precision" role="status"></p>
-      </div>
-      <label class="field">
-        <span>Qué muestra el número</span>
-        <select id="badge-mode">
-          <option value="pace">Veredicto: solo avisa si hay riesgo</option>
-          <option value="prob">Probabilidad de agotarlo</option>
-          <option value="percent">Porcentaje de uso</option>
-          <option value="limit">Tiempo hasta el límite</option>
-          <option value="reset">Tiempo hasta el reinicio</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Forma del ícono</span>
-        <select id="icon-shape">
-          <option value="rings">Dos anillos</option>
-          <option value="donut">Donut + anillo de tiempo</option>
-          <option value="pie1">Torta 1 (uso)</option>
-          <option value="pie2">Torta 2 (uso + anillo de tiempo)</option>
-          <option value="pie3">Torta 3 (uso + torta de tiempo)</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Transparencia del número <b id="alpha-value"></b></span>
-        <input type="range" id="number-alpha" min="15" max="100" step="5">
-      </label>
-      <div class="icon-preview" aria-hidden="true">
-        <div class="pv light"><canvas id="pv-light" width="128" height="128"></canvas><canvas id="pv-light-s" width="32" height="32"></canvas></div>
-        <div class="pv dark"><canvas id="pv-dark" width="128" height="128"></canvas><canvas id="pv-dark-s" width="32" height="32"></canvas></div>
-      </div>
-      <label class="field">
-        <span>Tamaño del número <b id="scale-value"></b></span>
-        <input type="range" id="number-scale" min="50" max="160" step="5">
-      </label>
-      <label class="field">
-        <span>Posición horizontal <b id="dx-value"></b></span>
-        <input type="range" id="number-dx" min="-30" max="30" step="1">
-      </label>
-      <label class="field">
-        <span>Posición vertical <b id="dy-value"></b></span>
-        <input type="range" id="number-dy" min="-30" max="30" step="1">
-      </label>
-      <div class="actions"><button id="number-reset" class="text-btn">Restablecer número</button></div>
-      <label class="toggle"><input type="checkbox" id="update-check"> Buscar actualizaciones de la app y del servidor (consulta los releases en GitHub cada 6 h)</label>
-      <label class="toggle"><input type="checkbox" id="alerts"> Alertas al 80 %, 90 % y si el límite llega antes del reinicio</label>
-      <p id="precision" class="muted precision"></p>
-      <p id="import-status" class="muted precision" role="status"></p>
-      <div class="actions">
-        <button id="export" class="text-btn">Exportar CSV</button>
-        <button id="import" class="text-btn">Importar CSV</button>
-        
-        <button id="export-weekly" class="text-btn">Exportar semanal</button>
-        
-      </div>
+        <p id="import-status" class="row-desc" role="status"></p>
+      </section>
     </details>
 
     <footer id="app-version" title="Los tiempos son estimaciones, no garantías."></footer>
