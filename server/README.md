@@ -37,7 +37,9 @@ services:
       # CLAUDE_ORG_ID: ""           # si tienes varias organizaciones
 ```
 
-Comprueba que responde: `curl -H "Authorization: Bearer <tu token>" http://localhost:8787/usage`.
+Abre `http://<ip-del-servidor>:8787/` en el navegador (también desde el móvil): es una página para ver el uso que pide el
+token la primera vez y lo recuerda en ese navegador. Desde la terminal:
+`curl -H "Authorization: Bearer <tu token>" http://localhost:8787/usage`.
 Si prefieres no dejar los secretos en el compose, ponlos en un `.env` (ver [`.env.example`](.env.example)) y cambia
 `environment:` por `env_file: .env`.
 
@@ -58,6 +60,7 @@ conviene actualizarlo. Para actualizar: `docker compose pull && docker compose u
 
 | Ruta | Auth | Respuesta |
 |---|---|---|
+| `GET /` | no | Página web para ver el uso (estática; pide los datos a `/usage` con el token). |
 | `GET /usage` | `Bearer API_TOKEN` | `{ version, fetchedAt, usage, error, errorAt }`; `usage` es la respuesta de claude.ai (`five_hour`, `seven_day`, `seven_day_*`). 503 si aún no hay datos. |
 | `POST /usage` | `Bearer API_TOKEN` | Igual que `GET`, pero antes consulta claude.ai al momento (la flecha de recargar de la app). Como mucho una consulta cada `REFRESH_MIN_SECONDS` (15 s); dentro de ese margen devuelve lo último. |
 | `GET /health` | no | `{ version, ok, fetchedAt, error }` sin datos de uso. |

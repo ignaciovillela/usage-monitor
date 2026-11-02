@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Usage Monitor</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Usage Monitor</h1>
+      <div id="status" class="sub">Cargando…</div>
+    </div>
+    <button id="refresh" class="btn icon-btn" title="Consultar ahora" aria-label="Consultar ahora">↻</button>
+  </header>
+
+  <section id="login" class="card" hidden>
+    <form id="login-form">
+      <p>Este servidor pide un token: es el mismo <code>API_TOKEN</code> del compose (el que generaste en la app).</p>
+      <div class="input-row">
+        <input id="token" type="password" autocomplete="current-password" placeholder="Token" required>
+        <button class="btn primary" type="submit">Entrar</button>
+      </div>
+      <p id="login-error" class="sub" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="error" class="card notice" hidden><p id="error-text"></p></section>
+
+  <section id="five" class="card" hidden>
+    <div class="hero-top"><span class="label">Ventana de 5 horas</span><span id="five-reset" class="sub"></span></div>
+    <div class="big" id="five-pct">—</div>
+    <div class="bar" id="five-bar"><i></i><b title="Tiempo transcurrido de la ventana"></b></div>
+    <div class="meta"><span id="five-elapsed"></span><span id="five-left"></span></div>
+  </section>
+
+  <section id="weekly" class="card" hidden></section>
+
+  <footer>
+    <span id="version" hidden></span>
+    <span id="logout-wrap" hidden><button id="logout" class="linklike">Olvidar token</button></span>
+    <a href="https://github.com/ignaciovillela/usage-monitor" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -157,3 +157,28 @@ test("el servidor no arranca sin API_TOKEN y explica cómo generarlo", () => {
   assert.match(r.stderr, /Falta API_TOKEN.*Generar/s);
   assert.match(r.stderr, /API_TOKEN=none/);
 });
+
+test("página web: se sirve sin token, con CSP estricta, y no lleva datos de uso", async t => {
+  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "tk", baseUrl: "http://127.0.0.1:9" };
+  const monitor = createMonitor(config, quiet);
+  monitor.state.fetchedAt = Date.now(); monitor.state.usage = CLAUDE_AI;
+  const server = createServer(monitor, config);
+  const url = await listen(server);
+  t.after(() => { server.close(); monitor.stop(); });
+  const page = await fetch(`${url}/`);
+  assert.strictEqual(page.status, 200);
+  assert.match(page.headers.get("content-type"), /text\/html/);
+  assert.match(page.headers.get("content-security-policy"), /script-src 'self'/);
+  const html = await page.text();
+  assert.match(html, /<script src="app.js">/);
+  assert.ok(!html.includes("seven_day_opus") && !html.includes("92"), "la página no incrusta datos");
+  for (const [file, type] of [["app.js", /javascript/], ["style.css", /css/]]) {
+    const r = await fetch(`${url}/${file}`);
+    assert.strictEqual(r.status, 200);
+    assert.match(r.headers.get("content-type"), type);
+  }
+  assert.strictEqual((await fetch(`${url}/server.js`)).status, 404, "solo se sirven los archivos de web/");
+  assert.strictEqual((await fetch(`${url}/../server.js`)).status, 404);
+  assert.strictEqual((await fetch(`${url}/`, { method: "POST" })).status, 405);
+  assert.strictEqual((await fetch(`${url}/usage`)).status, 401, "los datos siguen pidiendo token");
+});
