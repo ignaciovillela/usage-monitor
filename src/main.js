@@ -18,7 +18,8 @@ const ICON_REFRESH_MS = 5000;           // el ícono se redibuja cada pocos segu
 const PAGE_RELOAD_MS = 3 * 60 * 60 * 1000;
 
 app.setName("Usage Monitor");
-if (process.platform === "win32") app.setAppUserModelId("io.github.ignaciovillela.usage-monitor");   // necesario para las notificaciones de Windows
+const APP_ID = "io.github.ignaciovillela.usage-monitor";
+if (process.platform === "win32") app.setAppUserModelId(APP_ID);   // necesario para las notificaciones de Windows
 if (process.env.USAGE_MONITOR_DATA) app.setPath("userData", process.env.USAGE_MONITOR_DATA);   // para pruebas: otra instancia, otros datos
 // Instalación anterior (cuando la app se llamaba "Claude Usage"): se copian historial y ajustes una sola vez.
 // La sesión de claude.ai no se copia: hay que iniciarla de nuevo.
@@ -263,6 +264,16 @@ function render(force) {
   return renderChain;
 }
 
+// Windows: las ventanas usan su propio identificador de app. Al mostrar una notificación, Electron crea en el menú
+// Inicio un acceso directo con el identificador de la app, y la barra de tareas pasaría a mostrar el ícono fijo de ese
+// acceso directo en vez del ícono dinámico de la ventana.
+const WINDOW_APP_ID = APP_ID + ".window";
+function setupTaskbar(w) {
+  if (process.platform !== "win32" || !w) return;
+  w.setAppDetails({ appId: WINDOW_APP_ID });
+  if (taskbarIcon) w.setIcon(taskbarIcon);
+}
+
 // ── Menú del Dock y ventana de estado ───────────────────────────────────────
 function statusLines() {
   const s = currentState(), now = Date.now(), lines = [];
@@ -339,7 +350,7 @@ function showPanel() {
       ...panelBounds(), useContentSize: true, minWidth: 340, minHeight: 420, title: "Usage Monitor", backgroundColor: "#0d0d0d",
       webPreferences: { preload: path.join(__dirname, "panel-preload.js"), contextIsolation: false }
     });
-    if (taskbarIcon) panelWin.setIcon(taskbarIcon);
+    setupTaskbar(panelWin);
     panelWin.on("closed", () => { panelWin = null; });
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
     panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"));
@@ -427,7 +438,7 @@ function showLogin() { if (win) { win.show(); win.focus(); } }
 function createSessionWindow() {
   const ses = session.fromPartition("persist:claude");      // las cookies de claude.ai se conservan entre ejecuciones
   win = new BrowserWindow({ ...fitToScreen(1000, 760), minWidth: 480, minHeight: 420, show: false, title: "claude.ai", webPreferences: { partition: "persist:claude", backgroundThrottling: false } });
-  if (taskbarIcon) win.setIcon(taskbarIcon);
+  setupTaskbar(win);
   win.webContents.setWindowOpenHandler(() => ({ action: "allow" }));   // el inicio de sesión con Google abre una ventana
   win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.webContents.on("did-finish-load", () => { if (!busy && !MOCK) setTimeout(tick, 1500); });
