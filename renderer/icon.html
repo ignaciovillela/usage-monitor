@@ -4,12 +4,14 @@
 <script src="panel/util.js"></script>
 <script src="panel/core.js"></script>
 <script>
+// plate=false (Windows): solo la forma, ocupando todo el cuadro para que se vea lo más grande posible.
 // Dibuja el ícono del Dock: placa oscura de esquinas redondeadas (estilo macOS) y encima la forma elegida
 // (dos anillos, donut o tortas) con el número, usando el mismo drawIcon() que la extensión.
-function renderIcon(params, size) {
+function renderIcon(params, size, plate = true) {
   const inner = document.createElement("canvas");
   inner.width = inner.height = size;
   drawIcon(inner.getContext("2d"), size, params);
+  if (!plate) return inner.toDataURL("image/png");
 
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
