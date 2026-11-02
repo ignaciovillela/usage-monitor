@@ -68,12 +68,12 @@ jobs:
             type=sha,enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=usage-monitor-server
-            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
+            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de tu cuenta de Claude (login de Claude Code o cookie de claude.ai) y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
             org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/README.md
             org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ env.DOCS_REF }}/server
           annotations: |
             org.opencontainers.image.title=usage-monitor-server
-            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
+            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de tu cuenta de Claude (login de Claude Code o cookie de claude.ai) y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
             org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/README.md
             org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ env.DOCS_REF }}/server
       - uses: docker/build-push-action@v6

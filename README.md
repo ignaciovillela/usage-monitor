@@ -74,7 +74,7 @@ Si claude.ai muestra una verificación («comprobando que eres humano»), compl�
 
 Para que otro equipo (un servidor tuyo) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la **URL local** (red de casa), una **URL online** opcional o ambas (se usa la local y, si no responde, la online) y el token (el servidor de `server/` lo exige; *Generar* crea uno y lo copias en `API_TOKEN` del compose; se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL`, `USAGE_MONITOR_REMOTE_URL_ONLINE` y `USAGE_MONITOR_REMOTE_TOKEN`. La flecha de recargar hace `POST` a la URL para pedir datos frescos (si no lo admite, `GET`).
 
-La URL puede devolver el JSON de claude.ai (`five_hour`, `seven_day`, `seven_day_*`), el de la línea de estado de Claude Code (`{ rate_limits: … }`) o un sobre `{ fetchedAt, usage, error }`; con `fetchedAt` la app avisa si los datos tienen más de 15 minutos. En [`server/`](server/README.md) hay un servicio listo para Docker Compose que consulta claude.ai con tu sesión y trae todos los topes semanales.
+La URL puede devolver el JSON de claude.ai (`five_hour`, `seven_day`, `seven_day_*`), el de la línea de estado de Claude Code (`{ rate_limits: … }`) o un sobre `{ fetchedAt, usage, error }`; con `fetchedAt` la app avisa si los datos tienen más de 15 minutos. En [`server/`](server/README.md) hay un servicio listo para Docker Compose que consulta el uso con el login de Claude Code de esa máquina (o con tu cookie de claude.ai) y trae todos los topes semanales.
 
 ## Estructura
 

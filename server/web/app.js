@@ -62,7 +62,8 @@ function showError(text) { $("error").hidden = !text; $("error-text").textConten
 
 function render() {
   const now = Date.now(), b = last || {};
-  $("version").textContent = b.version ? `Servidor v${b.version}` : "";
+  const via = b.source === "claude-code" ? " · login de Claude Code" : b.source === "claude.ai" ? " · cookie de claude.ai" : "";
+  $("version").textContent = b.version ? `Servidor v${b.version}${via}` : "";
   $("version").hidden = !b.version;
   const fetchedAt = parseTs(b.fetchedAt);
   const ago = fetchedAt && now - fetchedAt < 60000 ? "hace un momento" : `hace ${fmtDuration(now - fetchedAt)}`;

@@ -182,3 +182,113 @@ test("página web: se sirve sin token, con CSP estricta, y no lleva datos de uso
   assert.strictEqual((await fetch(`${url}/`, { method: "POST" })).status, 405);
   assert.strictEqual((await fetch(`${url}/usage`)).status, 401, "los datos siguen pidiendo token");
 });
+
+// Fuente «Claude Code»: login de ~/.claude/.credentials.json contra un Anthropic simulado.
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+function fakeAnthropic(t) {
+  const seen = { usage: [], token: [] };
+  let valid = new Set(["acceso-1"]), rejectRefresh = false;
+  const upstream = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", c => { raw += c; });
+    req.on("end", () => {
+      res.setHeader("Content-Type", "application/json");
+      if (req.url === "/v1/oauth/token" && req.method === "POST") {
+        const b = JSON.parse(raw);
+        seen.token.push(b);
+        if (rejectRefresh || b.refresh_token !== "renueva-1") { res.writeHead(400); return res.end(JSON.stringify({ error: "invalid_grant" })); }
+        valid.add("acceso-2");
+        return res.end(JSON.stringify({ access_token: "acceso-2", refresh_token: "renueva-2", expires_in: 28800, scope: "user:inference user:profile" }));
+      }
+      if (req.url === "/api/oauth/usage") {
+        seen.usage.push({ auth: req.headers.authorization, beta: req.headers["anthropic-beta"] });
+        if (!valid.has(String(req.headers.authorization).replace(/^Bearer /, ""))) { res.writeHead(401); return res.end("{}"); }
+        return res.end(JSON.stringify({ ...CLAUDE_AI, seven_day_opus: null, seven_day_breakdown: { rows: [] } }));
+      }
+      res.writeHead(404); res.end("{}");
+    });
+  });
+  t.after(() => upstream.close());
+  return { upstream, seen, revoke: tok => valid.delete(tok), allow: tok => valid.add(tok), set rejectRefresh(v) { rejectRefresh = v; } };
+}
+function credentialsFile(t, oauth) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "um-cred-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, ".credentials.json");
+  fs.writeFileSync(file, JSON.stringify({ otro: { x: 1 }, claudeAiOauth: { accessToken: "acceso-1", refreshToken: "renueva-1", scopes: ["user:inference", "user:profile"], subscriptionType: "max", ...oauth } }));
+  return file;
+}
+async function claudeCodeMonitor(t, file, env = {}) {
+  const fake = fakeAnthropic(t);
+  const base = await listen(fake.upstream);
+  const config = { ...readConfig({ CLAUDE_CREDENTIALS_FILE: file, ...env }), apiToken: "tk", apiUrl: base, tokenUrl: `${base}/v1/oauth/token` };
+  const logs = [];
+  const monitor = createMonitor(config, { error: m => logs.push(m), log() {} });
+  t.after(() => monitor.stop());
+  return { fake, monitor, config };
+}
+
+test("Claude Code: consulta el uso con el login del archivo", async t => {
+  const file = credentialsFile(t, { expiresAt: Date.now() + 3600e3 });
+  const { fake, monitor } = await claudeCodeMonitor(t, file);
+  await monitor.pollOnce();
+  assert.strictEqual(monitor.state.error, null);
+  assert.strictEqual(monitor.state.source, "claude-code");
+  assert.strictEqual(monitor.state.usage.five_hour.utilization, 40);
+  assert.deepStrictEqual(fake.seen.usage[0], { auth: "Bearer acceso-1", beta: "oauth-2025-04-20" });
+  assert.strictEqual(fake.seen.token.length, 0, "con el acceso vigente no renueva");
+  assert.strictEqual(parseRemote({ fetchedAt: Date.now(), usage: monitor.state.usage }, Date.now()).weekly.length, 1, "ignora topes nulos y el desglose");
+});
+
+test("Claude Code: con el acceso vencido lo renueva y lo guarda sin pisar lo demás", async t => {
+  const file = credentialsFile(t, { expiresAt: Date.now() - 1000 });
+  const { fake, monitor } = await claudeCodeMonitor(t, file);
+  fake.revoke("acceso-1");
+  await monitor.pollOnce();
+  assert.strictEqual(monitor.state.error, null);
+  assert.strictEqual(fake.seen.token.length, 1);
+  assert.deepStrictEqual(fake.seen.token[0], { grant_type: "refresh_token", refresh_token: "renueva-1", client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e", scope: "user:inference user:profile" });
+  const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.deepStrictEqual(saved.otro, { x: 1 });
+  assert.strictEqual(saved.claudeAiOauth.accessToken, "acceso-2");
+  assert.strictEqual(saved.claudeAiOauth.refreshToken, "renueva-2");
+  assert.strictEqual(saved.claudeAiOauth.subscriptionType, "max");
+  assert.ok(saved.claudeAiOauth.expiresAt > Date.now() + 7 * 3600e3);
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(file)), [".credentials.json"], "sin temporales");
+  await monitor.pollOnce();
+  assert.strictEqual(fake.seen.token.length, 1, "la siguiente consulta usa el acceso guardado");
+});
+
+test("Claude Code: si el archivo ya trae un acceso nuevo (lo renovó Claude Code), lo usa sin renovar", async t => {
+  const file = credentialsFile(t, { expiresAt: Date.now() + 3600e3 });
+  const { fake, monitor } = await claudeCodeMonitor(t, file);
+  await monitor.pollOnce();
+  fake.revoke("acceso-1");
+  fake.allow("acceso-2");
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  data.claudeAiOauth.accessToken = "acceso-2";
+  fs.writeFileSync(file, JSON.stringify(data));
+  await monitor.pollOnce();
+  assert.strictEqual(monitor.state.error, null);
+  assert.strictEqual(fake.seen.token.length, 0);
+});
+
+test("Claude Code: solo lectura y renovación rechazada dan errores claros", async t => {
+  const file = credentialsFile(t, { expiresAt: Date.now() - 1000 });
+  const ro = await claudeCodeMonitor(t, file, { CLAUDE_CREDENTIALS_RENEW: "false" });
+  await ro.monitor.pollOnce();
+  assert.match(ro.monitor.state.error, /venció.*CLAUDE_CREDENTIALS_RENEW/);
+  assert.strictEqual(ro.fake.seen.token.length, 0);
+
+  const rw = await claudeCodeMonitor(t, file);
+  rw.fake.rejectRefresh = true;
+  await rw.monitor.pollOnce();
+  assert.match(rw.monitor.state.error, /\/login/);
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, "utf8")).claudeAiOauth.accessToken, "acceso-1", "no toca el archivo si falla");
+
+  const missing = await claudeCodeMonitor(t, path.join(path.dirname(file), "no-existe.json"));
+  await missing.monitor.pollOnce();
+  assert.match(missing.monitor.state.error, /monta la carpeta ~\/\.claude/);
+});

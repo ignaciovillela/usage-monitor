@@ -1,5 +1,5 @@
 # Usage Monitor · servidor (opcional). Copia este archivo tal cual (también sirve como stack en Dockge o Portainer),
-# completa las dos líneas de environment y ejecuta: docker compose up -d
+# elige cómo accede a tu cuenta (A o B), pega el API_TOKEN y ejecuta: docker compose up -d
 services:
   usage-monitor:
     image: ghcr.io/ignaciovillela/usage-monitor-server:latest   # :dev para probar la rama dev
@@ -8,14 +8,27 @@ services:
     restart: unless-stopped
     ports:
       - "8787:8787"
+
+    # A) Login de Claude Code de esta máquina (recomendado si Claude Code está instalado aquí; no caduca).
+    #    El contenedor usa el usuario 1000; si el tuyo tiene otro número (comando: id -u), cámbialo.
+    #    En Dockge o Portainer escribe la ruta completa en vez de ~ (p. ej. /home/tu-usuario/.claude).
+    user: "1000:1000"
+    volumes:
+      - ~/.claude:/claude   # con escritura: si el acceso vence porque no usas Claude Code aquí, el servidor lo renueva
+
     environment:
-      # Cookie «sessionKey» de claude.ai (navegador → herramientas de desarrollo → Cookies → claude.ai).
-      # Da acceso a tu cuenta: queda solo en este servidor. Caduca cada cierto tiempo.
-      CLAUDE_SESSION_KEY: "sk-ant-sid01-..."
+      CLAUDE_CREDENTIALS_FILE: /claude/.credentials.json
+      # CLAUDE_CREDENTIALS_RENEW: "false"   # solo leer, sin renovar (puedes montar ~/.claude:/claude:ro)
+
+      # B) O la cookie «sessionKey» de claude.ai (navegador → herramientas de desarrollo → Cookies → claude.ai).
+      #    Borra lo de A (user, volumes y CLAUDE_CREDENTIALS_FILE). Caduca cada pocas semanas.
+      # CLAUDE_SESSION_KEY: "sk-ant-sid01-..."
+
       # Obligatorio. Lo genera la app: Ajustes y datos → Servidor propio → «Generar» → «Copiar».
       # "none" lo desactiva (solo en una red de confianza, nunca con una URL online).
       API_TOKEN: "pega-aquí-el-token"
+
       # Opcionales:
-      # POLL_SECONDS: "60"          # cada cuánto consulta claude.ai (mínimo 30)
+      # POLL_SECONDS: "60"          # cada cuánto consulta el uso (mínimo 30)
       # REFRESH_MIN_SECONDS: "15"   # mínimo entre recargas pedidas desde la app
-      # CLAUDE_ORG_ID: ""           # si tienes varias organizaciones
+      # CLAUDE_ORG_ID: ""           # solo con B, si tienes varias organizaciones
