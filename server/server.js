@@ -1,10 +1,14 @@
-// Usage Monitor · servicio opcional. Consulta el uso de claude.ai con tu cookie de sesión cada cierto tiempo
-// y lo sirve por HTTP para que la app (fuente «Servidor propio») u otras herramientas solo lo lean.
+// Usage Monitor · servicio opcional. Consulta el uso de tu cuenta de Claude cada cierto tiempo y lo sirve por HTTP
+// para que la app (fuente «Servidor propio») u otras herramientas solo lo lean. Dos formas de acceder a la cuenta:
+//   · CLAUDE_CREDENTIALS_FILE: el login de Claude Code de esta máquina (~/.claude/.credentials.json). Si el acceso
+//     vence, lo renueva y lo guarda en el mismo archivo, como otra terminal de Claude Code (CLAUDE_CREDENTIALS_RENEW=false
+//     para solo leer).
+//   · CLAUDE_SESSION_KEY: la cookie «sessionKey» de claude.ai.
 //
-//   GET  /usage  → { version, fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
+//   GET  /usage  → { version, source, fetchedAt, usage, error, errorAt }   (usage: five_hour, seven_day, …)
 //   POST /usage  → igual, pero antes consulta claude.ai al momento (como mucho una vez cada REFRESH_MIN_SECONDS)
 //   GET  /       → página web para ver el uso desde el navegador (pide el token y lo guarda en ese navegador)
-//   GET  /health → { version, ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
+//   GET  /health → { version, ok, source, fetchedAt, error }             (sin datos de uso; útil para healthchecks)
 //
 // Sin dependencias: Node 20+. Configuración por variables de entorno (ver .env.example).
 "use strict";
@@ -18,9 +22,13 @@ function readConfig(env = process.env) {
   const fromFile = name => env[`${name}_FILE`] ? fs.readFileSync(env[`${name}_FILE`], "utf8").trim() : (env[name] || "").trim();
   return {
     sessionKey: fromFile("CLAUDE_SESSION_KEY"),
+    credentialsFile: (env.CLAUDE_CREDENTIALS_FILE || "").trim(),
+    renewCredentials: !/^(0|false|no|off)$/i.test((env.CLAUDE_CREDENTIALS_RENEW || "").trim()),
     apiToken: fromFile("API_TOKEN"),
     orgId: (env.CLAUDE_ORG_ID || "").trim(),
     baseUrl: (env.CLAUDE_BASE_URL || "https://claude.ai").replace(/\/+$/, ""),
+    apiUrl: (env.ANTHROPIC_API_URL || "https://api.anthropic.com").replace(/\/+$/, ""),
+    tokenUrl: env.CLAUDE_OAUTH_TOKEN_URL || "https://platform.claude.com/v1/oauth/token",
     pollSeconds: Math.max(30, Number(env.POLL_SECONDS) || 60),
     refreshMinSeconds: Math.max(5, Number(env.REFRESH_MIN_SECONDS) || 15),
     port: Number(env.PORT) || 8787,
@@ -29,10 +37,9 @@ function readConfig(env = process.env) {
   };
 }
 
-function createMonitor(config, log = console) {
-  const state = { fetchedAt: null, usage: null, error: null, errorAt: null };
-  let orgId = config.orgId || null, failures = 0, timer = null, stopped = false, inflight = null, lastAttempt = 0;
-
+// Fuente «claude.ai»: cookie de sesión contra la API interna de la web.
+function cookieSource(config) {
+  let orgId = config.orgId || null;
   async function get(path) {
     const res = await fetch(config.baseUrl + path, {
       headers: { Accept: "application/json", Cookie: `sessionKey=${config.sessionKey}`, "User-Agent": config.userAgent },
@@ -53,14 +60,118 @@ function createMonitor(config, log = console) {
     if (!org) throw new Error("sin identificador de organización");
     return org.uuid || org.id;
   }
-  async function doPoll() {
-    try {
-      if (!config.sessionKey) throw new Error("Falta CLAUDE_SESSION_KEY.");
+  return {
+    name: "claude.ai",
+    async usage() {
       if (!orgId) orgId = await findOrg();
       let r = await get(`/api/organizations/${encodeURIComponent(orgId)}/usage`);
       if (r.status === 404 && !config.orgId) { orgId = await findOrg(); r = await get(`/api/organizations/${encodeURIComponent(orgId)}/usage`); }
-      if (r.status !== 200 || !r.body || !("five_hour" in r.body)) throw new Error(`uso: HTTP ${r.status}`);
-      Object.assign(state, { fetchedAt: Date.now(), usage: r.body, error: null, errorAt: null });
+      if (r.status !== 200) throw new Error(`uso: HTTP ${r.status}`);
+      return r.body;
+    }
+  };
+}
+
+// Fuente «Claude Code»: el login que Claude Code guarda en ~/.claude/.credentials.json. Se relee en cada consulta
+// (Claude Code lo renueva mientras se usa). Solo si el acceso ya venció —Claude Code no se está usando— lo renueva
+// el servidor y escribe el resultado en el mismo archivo; Claude Code relee el archivo cuando cambia.
+const CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_BETA = "oauth-2025-04-20";
+const LOGIN_AGAIN = "inicia sesión de nuevo en Claude Code en esa máquina (claude → /login)";
+function claudeCodeSource(config, log = console) {
+  const file = config.credentialsFile;
+  const ua = `usage-monitor-server/${VERSION}`;
+  function read() {
+    let data;
+    try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) {
+      if (e.code === "ENOENT") throw new Error(`No existe ${file}: monta la carpeta ~/.claude de la máquina donde está Claude Code.`);
+      if (e.code) throw new Error(`No se pudo leer ${file} (${e.code}).`);
+      throw new Error(`${file} no es JSON válido.`);
+    }
+    const oauth = data && data.claudeAiOauth;
+    if (!oauth || !oauth.accessToken) throw new Error(`Claude Code no tiene sesión iniciada: ${LOGIN_AGAIN}.`);
+    return { data, oauth };
+  }
+  const expired = oauth => Number(oauth.expiresAt) > 0 && Date.now() >= Number(oauth.expiresAt);
+  // Comprobar ANTES de renovar que se podrá guardar: renovar puede invalidar el login anterior, y si el nuevo no
+  // quedara en el archivo, Claude Code se quedaría sin sesión.
+  function writable() {
+    try { fs.accessSync(file, fs.constants.R_OK | fs.constants.W_OK); return true; } catch (_) { return false; }
+  }
+  function save(oauth) {
+    let data;
+    try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch (_) { data = {}; }      // releer: no pisar otros campos
+    const text = JSON.stringify({ ...data, claudeAiOauth: oauth });
+    const tmp = path.join(path.dirname(file), `.credentials.json.usage-monitor-${process.pid}.tmp`);
+    try {
+      fs.writeFileSync(tmp, text, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    } catch (_) {
+      try { fs.unlinkSync(tmp); } catch (__) { /* no llegó a crearse */ }
+      fs.writeFileSync(file, text, { mode: 0o600 });      // montaje de un solo archivo: no admite rename
+    }
+  }
+  async function renew(oauth) {
+    if (!config.renewCredentials) throw new Error("El acceso de Claude Code venció. Ábrelo en esa máquina para renovarlo, o quita CLAUDE_CREDENTIALS_RENEW=false.");
+    if (!oauth.refreshToken) throw new Error(`El acceso de Claude Code venció y no se puede renovar: ${LOGIN_AGAIN}.`);
+    if (!writable()) throw new Error(`El acceso de Claude Code venció y ${file} es de solo lectura: móntalo con escritura para renovarlo, o abre Claude Code en esa máquina.`);
+    const res = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": ua },
+      body: JSON.stringify({ grant_type: "refresh_token", refresh_token: oauth.refreshToken, client_id: CLAUDE_CODE_CLIENT_ID, scope: (Array.isArray(oauth.scopes) ? oauth.scopes : []).join(" ") }),
+      signal: AbortSignal.timeout(30000)
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body || !body.access_token) {
+      if (res.status === 400 || res.status === 401) throw new Error(`No se pudo renovar el acceso de Claude Code: ${LOGIN_AGAIN}.`);
+      throw new Error(`Renovación del acceso de Claude Code: HTTP ${res.status}.`);
+    }
+    const now = Date.now();
+    const next = { ...oauth, accessToken: body.access_token, refreshToken: body.refresh_token || oauth.refreshToken };
+    if (Number.isFinite(Number(body.expires_in))) next.expiresAt = now + Number(body.expires_in) * 1000;
+    if (Number.isFinite(Number(body.refresh_token_expires_in))) next.refreshTokenExpiresAt = now + Number(body.refresh_token_expires_in) * 1000;
+    if (typeof body.scope === "string" && body.scope) next.scopes = body.scope.split(" ").filter(Boolean);
+    save(next);
+    log.log(new Date().toISOString(), "acceso de Claude Code renovado");
+    return next;
+  }
+  async function get(token) {
+    const res = await fetch(`${config.apiUrl}/api/oauth/usage`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "anthropic-beta": OAUTH_BETA, "User-Agent": ua },
+      signal: AbortSignal.timeout(15000)
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  }
+  return {
+    name: "claude-code",
+    async usage() {
+      let { oauth } = read();
+      if (expired(oauth)) oauth = await renew(oauth);
+      let r = await get(oauth.accessToken);
+      if (r.status === 401) {
+        // Puede que Claude Code lo haya renovado entretanto; si no, el acceso dejó de valer antes de su fecha.
+        const again = read().oauth;
+        oauth = again.accessToken !== oauth.accessToken ? again : await renew(again);
+        r = await get(oauth.accessToken);
+        if (r.status === 401) throw new Error(`Anthropic rechazó el acceso de Claude Code: ${LOGIN_AGAIN}.`);
+      }
+      if (r.status !== 200) throw new Error(`uso: HTTP ${r.status}`);
+      return r.body;
+    }
+  };
+}
+
+function createMonitor(config, log = console) {
+  const source = config.credentialsFile ? claudeCodeSource(config, log) : config.sessionKey ? cookieSource(config) : null;
+  const state = { source: source && source.name, fetchedAt: null, usage: null, error: null, errorAt: null };
+  let failures = 0, timer = null, stopped = false, inflight = null, lastAttempt = 0;
+
+  async function doPoll() {
+    try {
+      if (!source) throw new Error("Falta CLAUDE_CREDENTIALS_FILE (login de Claude Code) o CLAUDE_SESSION_KEY (cookie de claude.ai).");
+      const usage = await source.usage();
+      if (!usage || typeof usage !== "object" || !("five_hour" in usage)) throw new Error("uso: respuesta sin five_hour");
+      Object.assign(state, { fetchedAt: Date.now(), usage, error: null, errorAt: null });
       failures = 0;
     } catch (e) {
       failures++;
@@ -126,7 +237,7 @@ function createServer(monitor, config, web = loadWeb()) {
     }
     if (pathname === "/health") {
       if (req.method !== "GET") return send(405, { error: "método no permitido" }, { Allow: "GET" });
-      return send(s.usage ? 200 : 503, { version: VERSION, ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
+      return send(s.usage ? 200 : 503, { version: VERSION, ok: !!s.usage, source: s.source, fetchedAt: s.fetchedAt, error: s.error });
     }
     if (pathname === "/usage") {
       if (req.method !== "GET" && req.method !== "POST") return send(405, { error: "método no permitido" }, { Allow: "GET, POST" });
@@ -141,7 +252,13 @@ function createServer(monitor, config, web = loadWeb()) {
 
 if (require.main === module) {
   const config = readConfig();
-  if (!config.sessionKey) { console.error("Falta CLAUDE_SESSION_KEY (o CLAUDE_SESSION_KEY_FILE)."); process.exit(1); }
+  if (!config.credentialsFile && !config.sessionKey) {
+    console.error("Falta el acceso a tu cuenta. Elige uno:");
+    console.error("  CLAUDE_CREDENTIALS_FILE: el login de Claude Code de esta máquina (p. ej. /claude/.credentials.json montando ~/.claude en /claude).");
+    console.error("  CLAUDE_SESSION_KEY (o CLAUDE_SESSION_KEY_FILE): la cookie «sessionKey» de claude.ai.");
+    process.exit(1);
+  }
+  if (config.credentialsFile && config.sessionKey) console.warn("Aviso: hay CLAUDE_CREDENTIALS_FILE y CLAUDE_SESSION_KEY; se usa el login de Claude Code.");
   if (!config.apiToken) {
     console.error("Falta API_TOKEN. Genera uno en la app (Ajustes y datos → Servidor propio → «Generar» → «Copiar») y pega la línea en .env.");
     console.error("Para no usar token (solo en una red de confianza), pon API_TOKEN=none.");
@@ -150,7 +267,8 @@ if (require.main === module) {
   if (config.apiToken === NO_TOKEN) console.warn("Aviso: API_TOKEN=none; cualquiera que alcance este puerto puede leer /usage y forzar consultas.");
   const monitor = createMonitor(config);
   const server = createServer(monitor, config);
-  server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor v${VERSION} en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));
+  const via = config.credentialsFile ? `login de Claude Code (${config.credentialsFile}${config.renewCredentials ? "" : ", solo lectura"})` : "cookie de claude.ai";
+  server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor v${VERSION} en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s, vía ${via})`));
   monitor.start();
   const shutdown = () => { monitor.stop(); server.close(() => process.exit(0)); };
   process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);
