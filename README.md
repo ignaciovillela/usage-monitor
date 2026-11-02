@@ -105,6 +105,8 @@ Para otro servicio o suscripción: [docs/ADAPTING.md](docs/ADAPTING.md).
 
 El pie del panel muestra la versión de la app y, con servidor propio, la del servidor y la URL que respondió (local u online). Cada 6 h la app consulta la lista de releases del repositorio de `package.json` (`repository`) y avisa en el panel, en el menú y con una notificación (una vez por versión) si hay una versión nueva de la app o si el servidor está desactualizado o es más nuevo que la app. Se desactiva en *Ajustes y datos → Buscar actualizaciones*; `USAGE_MONITOR_RELEASES_URL` apunta a otra API compatible. La consulta no envía datos de uso.
 
+**Canal dev.** Cada cambio en la rama `dev` publica un pre-release `vX.Y.Z-dev.N` (N = número de commits; se conservan los últimos 10) con los instaladores, y la imagen del servidor `X.Y.Z-dev.N` y `:dev` con la misma versión. Una app de dev avisa cuando hay un dev más nuevo o la estable correspondiente; una app estable solo mira las estables.
+
 ## Privacidad
 
 Todo queda en tu equipo: `~/Library/Application Support/Usage Monitor` (macOS) o `%APPDATA%\Usage Monitor` (Windows) (historial, modelo, ajustes y la sesión de la ventana de claude.ai). Se guardan porcentajes de uso y horas de reinicio, no contenido de conversaciones. «Exportar CSV» incluye tu patrón de uso: no lo subas al repositorio (`*.csv` está en `.gitignore`).

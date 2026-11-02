@@ -1,7 +1,7 @@
 name: server-image
 # Imagen del servicio opcional (server/) en ghcr.io:
-#   release publicado → X.Y.Z, X.Y y latest
-#   push a dev        → dev y dev-<sha>, con versión X.Y.Z-dev.N dentro (la app la muestra y la compara)
+#   release publicado   → X.Y.Z, X.Y y latest
+#   push a dev          → X.Y.Z-dev.N (N = número de commits, igual que el pre-release de la app), dev y dev-<sha>
 #   PR que toca server/ → solo compila, sin publicar
 on:
   release:
@@ -24,18 +24,27 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/usage-monitor-server
+  # La página del paquete en GitHub lee estos datos del índice de la imagen (multi-arquitectura), no de cada plataforma.
+  DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+  DOCS_REF: ${{ github.event_name == 'push' && 'dev' || 'main' }}
 
 jobs:
   image:
-    # El pre-release «dev» no es una versión: su imagen sale del push a dev.
-    if: github.event_name != 'release' || github.event.release.tag_name != 'dev'
+    # Los pre-releases de dev no son versiones estables: su imagen sale del push a dev.
+    if: github.event_name != 'release' || !contains(github.event.release.tag_name, '-dev.')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Versión de desarrollo (push a dev)
+        id: dev
         if: github.event_name == 'push'
         working-directory: server
-        run: npm version "$(node -p "require('./package.json').version")-dev.${{ github.run_number }}" --no-git-tag-version
+        run: |
+          version="$(node -p "require('./package.json').version")-dev.$(git rev-list --count HEAD)"
+          npm version "$version" --no-git-tag-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Login a ghcr.io
@@ -53,12 +62,20 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=${{ steps.dev.outputs.version }},enable=${{ github.event_name == 'push' }}
             type=raw,value=dev,enable=${{ github.event_name == 'push' }}
             type=sha,prefix=dev-,enable=${{ github.event_name == 'push' }}
             type=sha,enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=usage-monitor-server
-            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP
+            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/README.md
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ env.DOCS_REF }}/server
+          annotations: |
+            org.opencontainers.image.title=usage-monitor-server
+            org.opencontainers.image.description=Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP y en una página web. Compose de ejemplo: https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/docker-compose.yml
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/${{ env.DOCS_REF }}/server/README.md
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/${{ env.DOCS_REF }}/server
       - uses: docker/build-push-action@v6
         with:
           context: server
@@ -66,5 +83,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

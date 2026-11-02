@@ -1,7 +1,8 @@
 name: release
 # Al publicar un release, compila la app para macOS (Apple Silicon, instalador .dmg) y Windows (x64, .zip) y los adjunta.
 # En los PR que tocan el empaquetado solo compila (sin adjuntar nada), para detectar roturas antes de publicar.
-# Cada push a dev compila una versión X.Y.Z-dev.N y reemplaza el pre-release «dev» con sus instaladores.
+# Cada push a dev publica su propio pre-release vX.Y.Z-dev.N (N = número de commits, igual que la imagen del servidor)
+# y conserva los últimos 10.
 on:
   release:
     types: [published]
@@ -28,10 +29,36 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
+  # Versión y tag de esta compilación. En dev: X.Y.Z-dev.N con N = commits hasta aquí (el mismo N que usa la imagen).
+  meta:
+    runs-on: ubuntu-latest
+    # Los pre-releases de dev los crea este workflow: publicarlos no debe recompilar nada.
+    if: github.event_name != 'release' || !contains(github.event.release.tag_name, '-dev.')
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          base=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            version="$base-dev.$(git rev-list --count HEAD)"; tag="v$version"
+          elif [ -n "$RELEASE_TAG" ]; then
+            version="$base"; tag="$RELEASE_TAG"
+          else
+            version="$base"; tag="build-$GITHUB_RUN_NUMBER"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Versión $version · tag $tag"
+
   build:
     name: build (${{ matrix.name }})
-    # El pre-release «dev» lo crea este mismo workflow: no se recompila al publicarlo.
-    if: github.event_name != 'release' || github.event.release.tag_name != 'dev'
+    needs: meta
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +67,7 @@ jobs:
           - { name: windows-x64, os: windows-latest, script: "build:win" }
     runs-on: ${{ matrix.os }}
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag || (github.event_name == 'push' && 'dev') || format('build-{0}', github.run_number) }}
+      TAG: ${{ needs.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,7 +77,7 @@ jobs:
       - name: Versión de desarrollo (push a dev)
         if: github.event_name == 'push'
         shell: bash
-        run: npm version "$(node -p "require('./package.json').version")-dev.${{ github.run_number }}" --no-git-tag-version
+        run: npm version "${{ needs.meta.outputs.version }}" --no-git-tag-version
       - run: npm run ${{ matrix.script }}
 
       - name: Instalador .dmg (macOS)
@@ -74,9 +101,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" dist/Usage-Monitor-* --clobber --repo "$GITHUB_REPOSITORY"
 
-  # Push a dev: reemplaza el pre-release «dev» (tag movible) con los instaladores de este commit.
+  # Push a dev: pre-release propio con los instaladores de este commit; se conservan los últimos 10 de dev.
   dev-release:
-    needs: build
+    needs: [meta, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
@@ -84,12 +111,29 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Pre-release dev
+      - name: Pre-release de dev
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
-          RUN: ${{ github.run_number }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          gh release delete dev --repo "$REPO" --cleanup-tag --yes || true
-          gh release create dev dist/Usage-Monitor-* --repo "$REPO" --target "$SHA" --prerelease --title "dev (build $RUN)"             --notes "Compilación automática de la rama dev (${SHA:0:7}). No es estable: úsala para probar. La imagen del servidor es ghcr.io/${REPO,,}-server:dev."
+          image="ghcr.io/${REPO,,}-server:$VERSION"
+          notes="Compilación automática de la rama dev (${SHA:0:7}). No es estable: úsala para probar.
+
+          Servidor: \`$image\` (o \`:dev\` para seguir siempre la última de dev)."
+          gh release create "$TAG" dist/Usage-Monitor-* --repo "$REPO" --target "$SHA" --prerelease --title "$TAG (dev)" --notes "$notes"
+      - name: Limpiar pre-releases de dev antiguos (se conservan 10)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # El antiguo pre-release rodante «dev» (y su tag, que chocaba con la rama dev) ya no se usa.
+          gh release delete dev --repo "$REPO" --cleanup-tag --yes 2>/dev/null || true
+          gh release list --repo "$REPO" --limit 200 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | test("-dev\\.[0-9]+$"))] | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' |
+          while read -r old; do
+            echo "Borrando $old"
+            gh release delete "$old" --repo "$REPO" --cleanup-tag --yes
+          done
