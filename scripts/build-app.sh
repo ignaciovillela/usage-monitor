@@ -14,7 +14,7 @@ iconutil -c icns build/icon.iconset -o build/icon.icns
 echo "→ app"
 ARCH=$(uname -m | sed 's/x86_64/x64/')
 npx @electron/packager . "Usage Monitor" --platform=darwin --arch="$ARCH" --icon=build/icon.icns --out="$OUT" --overwrite \
-  --app-bundle-id=io.github.ignaciovillela.usage-monitor --ignore='^/(selftest|dist|build|tests|docs|assets|\.github|PRD\.md|README.*|CONTRIBUTING\.md|LICENSE)($|/)'
+  --app-bundle-id=io.github.ignaciovillela.usage-monitor --ignore='^/(selftest|dist|build|tests|docs|server|assets|\.github|PRD\.md|README.*|CONTRIBUTING\.md|LICENSE)($|/)'
 APP=$(ls -d "$OUT"/*/Usage\ Monitor.app)
 codesign --force --deep --sign - "$APP"   # firma ad-hoc: sin esto macOS en Apple Silicon puede negarse a abrirla
 echo "Listo: $APP"

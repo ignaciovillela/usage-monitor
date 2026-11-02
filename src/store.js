@@ -6,7 +6,7 @@ const { app } = require("electron");
 const dataFile = () => path.join(app.getPath("userData"), "usage-data.json");
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
 
-const DEFAULT_SETTINGS = { shape: "donut", mode: "pace", alpha: 0.7, pollSeconds: 20, source: "claude-code", connectPrompted: false, alerts: true, numScale: 1, numDx: 0, numDy: 0 };
+const DEFAULT_SETTINGS = { shape: "donut", mode: "pace", alpha: 0.7, pollSeconds: 20, source: "claude-code", connectPrompted: false, alerts: true, numScale: 1, numDx: 0, numDy: 0, remoteUrl: "", remoteUrlOnline: "", remoteToken: "", updateCheck: true, notifiedUpdates: [] };
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (_) { return fallback; }
@@ -20,7 +20,7 @@ function writeJson(file, value) {
   } catch (e) { console.error("no se pudo guardar", file, e.message); }
 }
 // `source` solo admite estos valores; los ajustes de la app antigua traen otros (p. ej. "extension") y se descartan.
-const SOURCES = ["claude-code", "web"];
+const SOURCES = ["claude-code", "web", "remote"];
 function loadSettings() {
   const s = { ...DEFAULT_SETTINGS, ...readJson(settingsFile(), {}) };
   if (!SOURCES.includes(s.source)) s.source = DEFAULT_SETTINGS.source;

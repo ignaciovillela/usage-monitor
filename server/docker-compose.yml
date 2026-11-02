@@ -1,0 +1,9 @@
+services:
+  usage-monitor:
+    image: ghcr.io/ignaciovillela/usage-monitor-server:latest
+    # build: .              # para compilarla tú mismo desde el repo en vez de descargarla
+    container_name: usage-monitor
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8787:8787"
