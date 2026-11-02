@@ -1,0 +1,43 @@
+const test = require("node:test");
+const assert = require("node:assert");
+const { compareVersions, latestRelease, repoUrls, advice } = require("../src/updates");
+
+test("compara versiones (con o sin v, prerelease antes que estable)", () => {
+  assert.strictEqual(compareVersions("0.4.0", "v0.4.1"), -1);
+  assert.strictEqual(compareVersions("v1.0.0", "0.9.9"), 1);
+  assert.strictEqual(compareVersions("0.4.0", "0.4.0"), 0);
+  assert.strictEqual(compareVersions("0.4.0-beta.1", "0.4.0"), -1);
+  assert.strictEqual(compareVersions("basura", "0.4.0"), 0);
+});
+test("último release: el de versión más alta, sin borradores (los pre-release cuentan)", () => {
+  const r = latestRelease([
+    { tag_name: "v0.3.2", html_url: "u32", prerelease: true },
+    { tag_name: "v0.5.0", html_url: "u50", draft: true },
+    { tag_name: "v0.4.1", html_url: "u41", prerelease: true },
+    { tag_name: "nightly" }
+  ]);
+  assert.deepStrictEqual(r, { version: "0.4.1", url: "u41" });
+  assert.strictEqual(latestRelease([]), null);
+});
+test("repositorio desde package.json y variable para cambiar la API", () => {
+  const pkg = { repository: { url: "https://github.com/ana/usage-monitor.git" } };
+  assert.deepStrictEqual(repoUrls(pkg, {}), { api: "https://api.github.com/repos/ana/usage-monitor/releases?per_page=20", page: "https://github.com/ana/usage-monitor/releases" });
+  assert.strictEqual(repoUrls(pkg, { USAGE_MONITOR_RELEASES_URL: "https://x/api" }).api, "https://x/api");
+  assert.deepStrictEqual(repoUrls({}, {}), { api: null, page: null });
+});
+test("avisos: app vieja, servidor viejo, servidor más nuevo que la app, todo al día", () => {
+  const latest = { version: "0.5.0", url: "rel" };
+  const kinds = a => a.map(x => `${x.kind}@${x.version}`);
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.4.0", serverVersion: "0.4.0", latest })), ["app@0.5.0", "server@0.5.0"]);
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.5.0", serverVersion: "0.4.0", latest })), ["server@0.5.0"]);
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.5.0", serverVersion: "0.5.0", latest })), []);
+  // Sin consultar releases: solo se compara app y servidor.
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.4.0", serverVersion: "0.3.2", latest: null })), ["server@0.4.0"]);
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.4.0", serverVersion: "0.4.1", latest: null })), ["app@0.4.1"]);
+  // Sin servidor o con un servidor que no dice su versión: solo la app.
+  assert.deepStrictEqual(kinds(advice({ appVersion: "0.4.0", serverVersion: null, latest })), ["app@0.5.0"]);
+  assert.match(advice({ appVersion: "0.5.0", serverVersion: "0.4.0", latest })[0].text, /docker compose pull/);
+});
+test("la app y el servidor comparten número de versión", () => {
+  assert.strictEqual(require("../server/package.json").version, require("../package.json").version);
+});

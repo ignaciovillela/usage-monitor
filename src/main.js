@@ -1,12 +1,13 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
 const claudeCode = require("./providers/claude-code");
 const remote = require("./providers/remote");
+const updates = require("./updates");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -87,8 +88,14 @@ async function fetchUsageViaPage() {
 }
 
 // ── Servidor propio: URL y token (el token se cifra con el llavero del sistema si está disponible) ─────────
-// USAGE_MONITOR_REMOTE_URL y USAGE_MONITOR_REMOTE_TOKEN tienen prioridad sobre los ajustes (despliegues sin panel).
-const remoteUrl = () => process.env.USAGE_MONITOR_REMOTE_URL || settings.remoteUrl || "";
+// Dos URLs: la local (red de casa) y una online opcional de respaldo; basta con una de las dos.
+// USAGE_MONITOR_REMOTE_URL, USAGE_MONITOR_REMOTE_URL_ONLINE y USAGE_MONITOR_REMOTE_TOKEN tienen prioridad sobre los ajustes.
+const remoteFromEnv = () => !!(process.env.USAGE_MONITOR_REMOTE_URL || process.env.USAGE_MONITOR_REMOTE_URL_ONLINE);
+const remoteUrls = () => remoteFromEnv()
+  ? { local: process.env.USAGE_MONITOR_REMOTE_URL || "", online: process.env.USAGE_MONITOR_REMOTE_URL_ONLINE || "" }
+  : { local: settings.remoteUrl || "", online: settings.remoteUrlOnline || "" };
+const remoteUrl = () => { const u = remoteUrls(); return u.local || u.online; };
+let remoteInfo = null;      // { version, via } de la última respuesta del servidor propio
 function remoteToken() {
   if (process.env.USAGE_MONITOR_REMOTE_TOKEN) return process.env.USAGE_MONITOR_REMOTE_TOKEN;
   const t = settings.remoteToken || "";
@@ -97,10 +104,14 @@ function remoteToken() {
 }
 const sealToken = t => !t ? "" : safeStorage.isEncryptionAvailable() ? "enc:" + safeStorage.encryptString(t).toString("base64") : t;
 // Desde el panel: guarda URL y token (token vacío = se mantiene el actual) y pasa a esta fuente con una consulta inmediata.
-async function setRemote({ url, token, clearToken } = {}) {
-  url = String(url || process.env.USAGE_MONITOR_REMOTE_URL || "").trim();
-  if (!remote.validUrl(url)) return { ok: false, error: "La URL debe empezar por http:// o https://." };
-  const next = { ...settings, remoteUrl: url };
+async function setRemote({ url, urlOnline, token, clearToken } = {}) {
+  const next = { ...settings };
+  if (!remoteFromEnv()) {
+    url = String(url || "").trim(); urlOnline = String(urlOnline || "").trim();
+    if (!url && !urlOnline) return { ok: false, error: "Escribe la URL local, la online o ambas." };
+    for (const u of [url, urlOnline]) if (u && !remote.validUrl(u)) return { ok: false, error: `«${u}» no es válida: debe empezar por http:// o https://.` };
+    Object.assign(next, { remoteUrl: url, remoteUrlOnline: urlOnline });
+  }
   if (clearToken) next.remoteToken = "";
   else if (token) next.remoteToken = sealToken(String(token).trim());
   settings = { ...next, source: "remote" };
@@ -115,8 +126,54 @@ async function setRemote({ url, token, clearToken } = {}) {
 async function readUsage(now, manual) {
   if (MOCK) return MOCK.next();
   if (settings.source === "claude-code") return claudeCode.readFeed(claudeCode.feedFile(), now);
-  if (settings.source === "remote") return remote.fetchUsage(remoteUrl(), remoteToken(), now, { refresh: manual });
+  if (settings.source === "remote") {
+    try {
+      const r = await remote.fetchRemote(remoteUrls(), remoteToken(), now, { refresh: manual });
+      setRemoteInfo({ version: r.version, via: r.via });
+      return r.usage;
+    } catch (e) {
+      if (e.serverVersion !== undefined) setRemoteInfo({ version: e.serverVersion, via: e.via });   // respondió aunque fuera con error
+      throw e;
+    }
+  }
   return fetchUsageViaPage();
+}
+function setRemoteInfo(info) {
+  const changed = !remoteInfo || remoteInfo.version !== info.version;
+  remoteInfo = info;
+  if (changed) refreshAdvice();
+}
+
+// ── Versiones y actualizaciones ─────────────────────────────────────────────
+// Cada 6 h se consulta la lista de releases (se puede desactivar en el panel); los avisos comparan la app,
+// el servidor propio (si se usa y dice su versión) y el último release. Cada versión nueva se notifica una sola vez.
+const UPDATE_CHECK_MS = 6 * 3600e3;
+const releases = updates.repoUrls(require("../package.json"));
+let latest = null, updateAdvice = [];
+async function checkUpdates() {
+  if (!settings.updateCheck || !releases.api || MOCK) return;
+  try { latest = await updates.fetchLatest(releases.api, app.getVersion()); }
+  catch (e) { console.error("no se pudo consultar las versiones:", e.message); return; }
+  refreshAdvice();
+}
+function refreshAdvice() {
+  const serverVersion = settings.source === "remote" && remoteInfo ? remoteInfo.version : null;
+  updateAdvice = updates.advice({ appVersion: app.getVersion(), serverVersion, latest: settings.updateCheck ? latest : null, releasesPage: releases.page });
+  for (const a of updateAdvice) {
+    const key = `${a.kind}@${a.version}`;
+    if ((settings.notifiedUpdates || []).includes(key)) continue;
+    saveFlag("notifiedUpdates", [...(settings.notifiedUpdates || []), key].slice(-10));
+    if (settings.alerts && Notification.isSupported()) {
+      const n = new Notification({ title: a.kind === "server" ? "Usage Monitor: actualiza el servidor" : "Usage Monitor: actualización disponible", body: a.text });
+      if (a.url) n.on("click", () => openRelease(a.url));
+      n.show();
+    }
+  }
+  refreshChrome(true); notifyPanel();
+}
+// Solo se abren las páginas de releases conocidas (las que vienen en los avisos o la del repositorio).
+function openRelease(url) {
+  if (url && (url === releases.page || updateAdvice.some(a => a.url === url)) && /^https:\/\//.test(url)) shell.openExternal(url);
 }
 async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
@@ -225,10 +282,12 @@ function updateSetting(key, value) {
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
+  if (key === "updateCheck") { if (value) checkUpdates(); else refreshAdvice(); }
   if (key === "source") {
     errors = 0; loginShown = false;
     if (value === "web" && !win) createSessionWindow();
     if (value === "remote" && !remoteUrl()) showPanel();      // el panel tiene los campos de URL y token
+    if (value !== "remote") refreshAdvice();                   // sin servidor propio no hay aviso sobre su versión
     tick();
   }
   render(true); refreshChrome(true);
@@ -236,6 +295,8 @@ function updateSetting(key, value) {
 function menuTemplate() {
   const lines = statusLines().map(label => ({ label, enabled: false }));
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
+  const advice = updateAdvice.map(a => ({ label: a.kind === "server" ? `Actualiza el servidor a v${a.version}…` : `Actualización disponible: v${a.version}…`, click: () => openRelease(a.url) }));
+  if (advice.length) lines.push({ type: "separator" }, ...advice);
   // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
   const more = [
     { label: "Fuente de datos", submenu: radio([["Claude Code (línea de estado)", "claude-code"], ["claude.ai (ventana propia)", "web"], ["Servidor propio (URL)…", "remote"]], settings.source, v => updateSetting("source", v)) },
@@ -297,13 +358,15 @@ function storageSnapshot() {
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
     appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
-    remoteUrl: remoteUrl(), remoteTokenSet: !!remoteToken(), remoteFromEnv: !!process.env.USAGE_MONITOR_REMOTE_URL,
+    remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
+    serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
+    updateAdvice, updateCheck: settings.updateCheck,
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
   };
 }
-const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy" };
+const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck" };
 ipcMain.handle("storage-get", (_e, keys) => {
   const all = storageSnapshot();
   if (keys == null) return all;
@@ -318,6 +381,7 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
   if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);
+  if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -488,6 +552,7 @@ app.whenReady().then(async () => {
   if (!MOCK && settings.source === "claude-code" && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
   if (!MOCK && settings.source === "web") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
+  setTimeout(checkUpdates, 10000); setInterval(checkUpdates, UPDATE_CHECK_MS);
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
   app.on("activate", () => { if (Date.now() - startedAt > 4000) showPanel(); });

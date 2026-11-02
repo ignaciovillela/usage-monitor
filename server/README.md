@@ -25,17 +25,21 @@ Para compilarla tú mismo desde el repo, cambia `image:` por `build: .` en el co
 
 Sin Docker: `CLAUDE_SESSION_KEY=… API_TOKEN=… node server.js`.
 
-En la app: panel → **Ajustes y datos** → Fuente de datos **Servidor propio (URL)** → URL
-`http://<tu-servidor>:8787/usage`, el token, y **Guardar y probar**. También se puede fijar con las variables
-`USAGE_MONITOR_REMOTE_URL` y `USAGE_MONITOR_REMOTE_TOKEN`.
+En la app: panel → **Ajustes y datos** → Fuente de datos **Servidor propio (URL)** → URL local
+`http://<ip-del-servidor>:8787/usage`, una URL online opcional (p. ej. detrás de tu proxy inverso o túnel), el token y
+**Guardar y probar**. La app usa la local y, si no responde, la online. También se puede fijar con
+`USAGE_MONITOR_REMOTE_URL`, `USAGE_MONITOR_REMOTE_URL_ONLINE` y `USAGE_MONITOR_REMOTE_TOKEN`.
+
+El servidor informa su versión (campo `version` y header `X-Usage-Monitor-Version`); la app la muestra y avisa si
+conviene actualizarlo. Para actualizar: `docker compose pull && docker compose up -d`.
 
 ## API
 
 | Ruta | Auth | Respuesta |
 |---|---|---|
-| `GET /usage` | `Bearer API_TOKEN` | `{ fetchedAt, usage, error, errorAt }`; `usage` es la respuesta de claude.ai (`five_hour`, `seven_day`, `seven_day_*`). 503 si aún no hay datos. |
+| `GET /usage` | `Bearer API_TOKEN` | `{ version, fetchedAt, usage, error, errorAt }`; `usage` es la respuesta de claude.ai (`five_hour`, `seven_day`, `seven_day_*`). 503 si aún no hay datos. |
 | `POST /usage` | `Bearer API_TOKEN` | Igual que `GET`, pero antes consulta claude.ai al momento (la flecha de recargar de la app). Como mucho una consulta cada `REFRESH_MIN_SECONDS` (15 s); dentro de ese margen devuelve lo último. |
-| `GET /health` | no | `{ ok, fetchedAt, error }` sin datos de uso. |
+| `GET /health` | no | `{ version, ok, fetchedAt, error }` sin datos de uso. |
 
 La app acepta también una URL que devuelva directamente el JSON de claude.ai o el de la línea de estado de Claude Code
 (`{ rate_limits: … }`), así que puedes servir los datos con otra herramienta. Si esa URL no acepta `POST` (404/405/501), la app recarga con `GET`.

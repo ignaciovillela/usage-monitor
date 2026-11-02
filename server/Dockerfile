@@ -1,6 +1,6 @@
 FROM node:20-alpine
 WORKDIR /app
-COPY server.js ./
+COPY package.json server.js ./
 USER node
 ENV PORT=8787
 EXPOSE 8787

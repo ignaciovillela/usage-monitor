@@ -39,24 +39,46 @@ function parseRemote(body, now) {
   if (data && typeof data === "object" && data.rate_limits) return parseFeed(data, now);
   throw remoteError("Respuesta del servidor con un formato desconocido (se espera five_hour o rate_limits).");
 }
-// refresh: la actualización manual hace POST a la misma URL para pedir datos frescos al servidor. Si el servidor no
-// admite POST (404/405/501, p. ej. un JSON estático), se repite con GET.
-async function fetchUsage(url, token, now = Date.now(), { refresh = false } = {}) {
-  if (!url) throw remoteError("Falta la URL del servidor: configúrala en el panel, en «Ajustes y datos».", "config");
-  if (!validUrl(url)) throw remoteError("La URL del servidor no es válida (debe empezar por http:// o https://).", "config");
+// Una URL. refresh: la actualización manual hace POST para pedir datos frescos; si el servidor no admite POST
+// (404/405/501, p. ej. un JSON estático), se repite con GET. Los errores llevan la versión del servidor si la informó.
+async function fetchOne(url, token, now, { refresh = false, timeoutMs = TIMEOUT_MS } = {}) {
+  if (!validUrl(url)) throw remoteError(`La URL ${url} no es válida (debe empezar por http:// o https://).`, "config");
   const headers = { Accept: "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const request = method => fetch(url, { method, headers, signal: AbortSignal.timeout(method === "POST" ? TIMEOUT_MS * 3 : TIMEOUT_MS), cache: "no-store" });
+  const request = method => fetch(url, { method, headers, signal: AbortSignal.timeout(method === "POST" ? timeoutMs * 3 : timeoutMs), cache: "no-store" });
   let res;
   try {
     res = await request(refresh ? "POST" : "GET");
     if (refresh && [404, 405, 501].includes(res.status)) res = await request("GET");
+  } catch (e) {
+    throw remoteError(`No se pudo conectar con ${new URL(url).host} (${e.name === "TimeoutError" ? "tiempo agotado" : e.cause && e.cause.code || e.message}).`, "network");
   }
-  catch (e) { throw remoteError(`No se pudo conectar con el servidor (${e.name === "TimeoutError" ? "tiempo agotado" : e.cause && e.cause.code || e.message}).`); }
-  if (res.status === 401 || res.status === 403) throw remoteError("El servidor rechazó el token.");
   let body = null;
   try { body = await res.json(); } catch (_) { /* se informa abajo */ }
-  if (!res.ok) throw remoteError(body && body.error ? `El servidor informa: ${body.error}` : `El servidor respondió HTTP ${res.status}.`);
-  return parseRemote(body, now);
+  const version = res.headers.get("x-usage-monitor-version") || (body && typeof body.version === "string" ? body.version : null);
+  const fail = message => { const e = remoteError(message); e.serverVersion = version; throw e; };
+  if (res.status === 401 || res.status === 403) fail("El servidor rechazó el token.");
+  if (!res.ok) fail(body && body.error ? `El servidor informa: ${body.error}` : `El servidor respondió HTTP ${res.status}.`);
+  try { return { usage: parseRemote(body, now), version }; } catch (e) { e.serverVersion = version; throw e; }
 }
-module.exports = { fetchUsage, parseRemote, validUrl };
+// Dos URLs opcionales: la local (red de casa) y la online. Se prueba la local y, si no se puede conectar, la online.
+// Un error de la local que no sea de conexión (token, datos viejos…) se informa tal cual: el servidor sí respondió.
+// Devuelve { usage, version, via: "local" | "online" }; los errores llevan `via` y `serverVersion`.
+async function fetchRemote({ local, online } = {}, token, now = Date.now(), { refresh = false } = {}) {
+  const targets = [["local", local], ["online", online]].filter(([, url]) => url);
+  if (!targets.length) throw remoteError("Falta la URL del servidor: configúrala en el panel, en «Ajustes y datos».", "config");
+  const failures = [];
+  for (const [via, url] of targets) {
+    // Con URL online de respaldo, la local se da por caída antes (fuera de casa no debería hacer esperar).
+    const timeoutMs = via === "local" && targets.length > 1 ? 4000 : TIMEOUT_MS;
+    try { return { ...(await fetchOne(url, token, now, { refresh, timeoutMs })), via }; }
+    catch (e) {
+      e.via = via;
+      if (e.kind !== "network") throw e;
+      failures.push(e.message);
+    }
+  }
+  throw remoteError(failures.join(" "), "remote");
+}
+const fetchUsage = async (url, token, now, opts) => (await fetchRemote({ local: url }, token, now, opts)).usage;
+module.exports = { fetchUsage, fetchRemote, parseRemote, validUrl };

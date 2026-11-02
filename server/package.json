@@ -1,0 +1,8 @@
+{
+  "name": "usage-monitor-server",
+  "version": "0.4.0",
+  "description": "Servicio opcional de Usage Monitor: consulta el uso de claude.ai y lo sirve por HTTP.",
+  "main": "server.js",
+  "private": true,
+  "license": "MIT"
+}

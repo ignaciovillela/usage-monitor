@@ -80,7 +80,7 @@ function renderSummary() {
   // Sin conexión no se muestran cifras viejas como si fueran actuales.
   const s = connected ? model.state : { status: model.state.status, error: model.state.error };
   $("status").textContent =
-    connected ? `Conectada a Claude.ai · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
+    connected ? `Conectada a ${ui.source || "Claude.ai"} · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
     s.status === "auth" ? "Sesión no disponible" :
     s.status === "error" ? "Error de conexión" : "Consultando…";
 
@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteTokenSet", "remoteFromEnv"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -494,7 +494,7 @@ async function load() {
   // Con Claude Code como fuente y sin conectar, la tarjeta ofrece conectar desde el propio panel.
   $("connect").hidden = !(data.dataSource === "claude-code" && !data.claudeCodeConnected && model.state.status !== "connected");
   renderSource(data);
-  $("app-version").textContent = data.appVersion ? `Usage Monitor v${data.appVersion}` : "";
+  renderVersions(data);
   renderAll();
   if (!$("connect").hidden) $("error").hidden = true;      // la tarjeta ya explica qué falta
   renderIconPreview();
@@ -513,25 +513,27 @@ function renderSource(data) {
   const source = data.dataSource || "claude-code";
   $("data-source").value = source;
   $("remote-fields").hidden = source !== "remote";
-  if (document.activeElement !== $("remote-url")) $("remote-url").value = data.remoteUrl || "";
-  $("remote-url").disabled = !!data.remoteFromEnv;
+  for (const [id, key] of [["remote-url", "remoteUrl"], ["remote-url-online", "remoteUrlOnline"]]) {
+    if (document.activeElement !== $(id)) $(id).value = data[key] || "";
+    $(id).disabled = !!data.remoteFromEnv;
+  }
   $("remote-token").placeholder = data.remoteTokenSet ? "guardado (vacío = mantenerlo)" : "opcional";
   $("remote-clear-token").hidden = !data.remoteTokenSet || !!data.remoteFromEnv;
-  if (data.remoteFromEnv) $("remote-status").textContent = "La URL viene de USAGE_MONITOR_REMOTE_URL.";
+  if (data.remoteFromEnv) $("remote-status").textContent = "Las URLs vienen de USAGE_MONITOR_REMOTE_URL / USAGE_MONITOR_REMOTE_URL_ONLINE.";
 }
 $("data-source").addEventListener("change", e => {
   const value = e.target.value;
   $("remote-fields").hidden = value !== "remote";
   $("remote-status").textContent = "";
   // Sin URL guardada, elegir «Servidor propio» solo muestra los campos; se activa al pulsar «Guardar y probar».
-  if (value === "remote" && !$("remote-url").value) { $("remote-url").focus(); return; }
+  if (value === "remote" && !$("remote-url").value && !$("remote-url-online").value) { $("remote-url").focus(); return; }
   chrome.runtime.sendMessage({ type: "SET_SOURCE", value }, () => { void chrome.runtime.lastError; load(); });
 });
 function saveRemote(extra = {}) {
   const status = $("remote-status");
   status.textContent = "Probando…";
   $("remote-save").disabled = true;
-  chrome.runtime.sendMessage({ type: "SET_REMOTE", url: $("remote-url").value, token: $("remote-token").value, ...extra }, r => {
+  chrome.runtime.sendMessage({ type: "SET_REMOTE", url: $("remote-url").value, urlOnline: $("remote-url-online").value, token: $("remote-token").value, ...extra }, r => {
     void chrome.runtime.lastError;
     $("remote-save").disabled = false;
     $("remote-token").value = "";
@@ -542,7 +544,34 @@ function saveRemote(extra = {}) {
 $("remote-save").addEventListener("click", () => saveRemote());
 $("remote-clear-token").addEventListener("click", () => saveRemote({ token: "", clearToken: true }));
 $("remote-url").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
+$("remote-url-online").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
 $("remote-token").addEventListener("keydown", e => { if (e.key === "Enter") saveRemote(); });
+
+// Versiones: pie con la app y el servidor (si se usa) y tarjeta con los avisos de actualización.
+function renderVersions(data) {
+  ui.source = data.dataSource === "claude-code" ? "Claude Code" : data.dataSource === "remote" ? `tu servidor${data.remoteVia ? ` (${data.remoteVia})` : ""}` : "Claude.ai";
+  const parts = [];
+  if (data.appVersion) parts.push(`Usage Monitor v${data.appVersion}`);
+  if (data.dataSource === "remote" && data.serverVersion) parts.push(`servidor v${data.serverVersion}${data.remoteVia ? ` (${data.remoteVia === "online" ? "online" : "local"})` : ""}`);
+  else if (data.dataSource === "remote" && data.remoteVia) parts.push(`servidor sin versión (${data.remoteVia})`);
+  $("app-version").textContent = parts.join(" · ");
+  $("update-check").checked = data.updateCheck !== false;
+  const advice = Array.isArray(data.updateAdvice) ? data.updateAdvice : [];
+  const box = $("updates");
+  box.hidden = !advice.length;
+  box.replaceChildren();
+  if (!advice.length) return;
+  const h = html("h2"); h.textContent = advice.some(a => a.kind === "app") ? "Actualización disponible" : "Actualiza el servidor";
+  box.append(h);
+  for (const a of advice) { const p = html("p"); p.textContent = a.text; box.append(p); }
+  const url = (advice.find(a => a.url) || {}).url;
+  if (url) {
+    const b = html("button"); b.className = "text-btn primary"; b.textContent = "Ver novedades";
+    b.addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url }));
+    const row = html("div"); row.className = "connect-actions"; row.append(b); box.append(row);
+  }
+}
+$("update-check").addEventListener("change", e => chrome.storage.local.set({ updateCheck: e.target.checked }));
 
 $("refresh").addEventListener("click", pollNow);
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => { ui.tab = b.dataset.tab; renderChart(); });

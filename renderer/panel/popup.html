@@ -43,6 +43,7 @@
     </section>
 
     <section id="weekly" class="weekly" hidden></section>
+    <section id="updates" class="connect updates" hidden></section>
     <section id="connect" class="connect" hidden>
       <h2>Conecta Usage Monitor con Claude Code</h2>
       <p>Lee tu uso desde Claude Code, donde ya tienes tu sesión: no necesitas iniciar sesión en ninguna ventana ni compartir cookies. Solo funciona con planes Pro y Max.</p>
@@ -81,7 +82,9 @@
         </select>
       </label>
       <div id="remote-fields" class="remote-fields" hidden>
-        <label class="field"><span>URL</span><input id="remote-url" type="url" placeholder="https://mi-servidor:8787/usage" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>URL local</span><input id="remote-url" type="url" placeholder="http://192.168.1.10:8787/usage" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>URL online</span><input id="remote-url-online" type="url" placeholder="opcional: https://mi-servidor.ejemplo/usage" autocomplete="off" spellcheck="false"></label>
+        <p class="muted hint">Se usa la local y, si no responde (fuera de casa), la online. Basta con una de las dos.</p>
         <label class="field"><span>Token</span><input id="remote-token" type="password" placeholder="opcional" autocomplete="off"></label>
         <div class="actions">
           <button id="remote-save" class="text-btn primary">Guardar y probar</button>
@@ -130,6 +133,7 @@
         <input type="range" id="number-dy" min="-30" max="30" step="1">
       </label>
       <div class="actions"><button id="number-reset" class="text-btn">Restablecer número</button></div>
+      <label class="toggle"><input type="checkbox" id="update-check"> Buscar actualizaciones de la app y del servidor (consulta los releases en GitHub cada 6 h)</label>
       <label class="toggle"><input type="checkbox" id="alerts"> Alertas al 80 %, 90 % y si el límite llega antes del reinicio</label>
       <p id="precision" class="muted precision"></p>
       <p id="import-status" class="muted precision" role="status"></p>

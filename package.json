@@ -2,6 +2,7 @@
   "name": "usage-monitor",
   "version": "0.4.0",
   "description": "Tray/Dock icon that shows your Claude usage and projects it until the window resets (macOS and Windows).",
+  "repository": { "type": "git", "url": "https://github.com/ignaciovillela/usage-monitor.git" },
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

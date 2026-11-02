@@ -113,3 +113,27 @@ test("actualización manual contra un servidor que solo acepta GET: repite con G
   assert.strictEqual((await fetchUsage(url, "", NOW, { refresh: true })).utilization, 40);
   assert.deepStrictEqual(methods, ["POST", "GET"]);
 });
+
+test("URL local y online: usa la local, cae a la online si la local no responde, informa versión y vía", async t => {
+  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "tk", baseUrl: "http://127.0.0.1:9" };
+  const monitor = createMonitor(config, quiet);
+  monitor.state.fetchedAt = Date.now(); monitor.state.usage = CLAUDE_AI;
+  const server = createServer(monitor, config);
+  const url = await listen(server);
+  t.after(() => { server.close(); monitor.stop(); });
+  const { fetchRemote } = require("../src/providers/remote");
+  const { VERSION } = require("../server/server");
+  const dead = "http://127.0.0.1:1/usage";      // puerto cerrado: conexión rechazada
+
+  let r = await fetchRemote({ local: `${url}/usage`, online: dead }, "tk");
+  assert.deepStrictEqual([r.via, r.version, r.usage.utilization], ["local", VERSION, 40]);
+  r = await fetchRemote({ local: dead, online: `${url}/usage` }, "tk");
+  assert.deepStrictEqual([r.via, r.version], ["online", VERSION]);
+  r = await fetchRemote({ online: `${url}/usage` }, "tk");
+  assert.strictEqual(r.via, "online");
+  // Si la local responde con error (token), no se prueba la online: el servidor sí respondió.
+  await assert.rejects(fetchRemote({ local: `${url}/usage`, online: `${url}/usage` }, "malo"), e => e.via === "local" && e.serverVersion === VERSION && /token/.test(e.message));
+  await assert.rejects(fetchRemote({ local: dead, online: dead }, "tk"), /No se pudo conectar.*No se pudo conectar/);
+  const health = await (await fetch(`${url}/health`)).json();
+  assert.strictEqual(health.version, VERSION);
+});

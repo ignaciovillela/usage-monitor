@@ -1,15 +1,16 @@
 // Usage Monitor · servicio opcional. Consulta el uso de claude.ai con tu cookie de sesión cada cierto tiempo
 // y lo sirve por HTTP para que la app (fuente «Servidor propio») u otras herramientas solo lo lean.
 //
-//   GET  /usage  → { fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
+//   GET  /usage  → { version, fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
 //   POST /usage  → igual, pero antes consulta claude.ai al momento (como mucho una vez cada REFRESH_MIN_SECONDS)
-//   GET  /health → { ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
+//   GET  /health → { version, ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
 //
 // Sin dependencias: Node 20+. Configuración por variables de entorno (ver .env.example).
 "use strict";
 const http = require("http");
 const fs = require("fs");
 const crypto = require("crypto");
+const VERSION = require("./package.json").version;      // la app la compara con la suya y con el último release
 
 function readConfig(env = process.env) {
   const fromFile = name => env[`${name}_FILE`] ? fs.readFileSync(env[`${name}_FILE`], "utf8").trim() : (env[name] || "").trim();
@@ -97,19 +98,19 @@ function authorized(req, token) {
 }
 function createServer(monitor, config) {
   return http.createServer(async (req, res) => {
-    const send = (status, obj, headers = {}) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(obj)); };
+    const send = (status, obj, headers = {}) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Usage-Monitor-Version": VERSION, ...headers }); res.end(JSON.stringify(obj)); };
     const { pathname } = new URL(req.url, "http://localhost");
     const s = monitor.state;
     if (pathname === "/health") {
       if (req.method !== "GET") return send(405, { error: "método no permitido" }, { Allow: "GET" });
-      return send(s.usage ? 200 : 503, { ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
+      return send(s.usage ? 200 : 503, { version: VERSION, ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
     }
     if (pathname === "/usage") {
       if (req.method !== "GET" && req.method !== "POST") return send(405, { error: "método no permitido" }, { Allow: "GET, POST" });
       if (!authorized(req, config.apiToken)) return send(401, { error: "token inválido" });
       req.resume();      // el cuerpo de un POST se ignora
       if (req.method === "POST") await monitor.refresh();
-      return send(s.usage ? 200 : 503, s);
+      return send(s.usage ? 200 : 503, { version: VERSION, ...s });
     }
     send(404, { error: "no encontrado" });
   });
@@ -121,10 +122,10 @@ if (require.main === module) {
   if (!config.apiToken) console.warn("Aviso: sin API_TOKEN, cualquiera en tu red puede leer /usage.");
   const monitor = createMonitor(config);
   const server = createServer(monitor, config);
-  server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));
+  server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor v${VERSION} en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));
   monitor.start();
   const shutdown = () => { monitor.stop(); server.close(() => process.exit(0)); };
   process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);
 }
 
-module.exports = { readConfig, createMonitor, createServer };
+module.exports = { readConfig, createMonitor, createServer, VERSION };
