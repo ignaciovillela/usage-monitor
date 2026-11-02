@@ -1,9 +1,9 @@
-// Fuente de uso: un servidor propio (p. ej. un homelab) que expone el uso por HTTP. La app solo lee y muestra.
+// Fuente de uso: un servidor propio que expone el uso por HTTP. La app solo lee y muestra.
 //
 // GET <url> con `Authorization: Bearer <token>` si hay token. Se aceptan tres formas de respuesta:
 //   1. La de claude.ai:      { five_hour: {...}, seven_day: {...}, ... }
 //   2. La de Claude Code:    { rate_limits: { five_hour: {...}, seven_day: {...} } }
-//   3. Un sobre:             { fetchedAt, usage: <1 o 2>, error } (es lo que devuelve homelab/server.js)
+//   3. Un sobre:             { fetchedAt, usage: <1 o 2>, error } (es lo que devuelve el servicio de ejemplo del repo)
 // En el sobre, `fetchedAt` (ms o ISO) sirve para avisar si el servidor dejó de actualizar.
 //
 // Contrato igual que los otros proveedores: => { utilization 0-100, resetsAt (ms)|null, idle, weekly: [...] }
