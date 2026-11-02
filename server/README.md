@@ -9,7 +9,8 @@ Es opcional: la app funciona sin él con Claude Code o con su propia ventana de 
 ## Puesta en marcha (Docker Compose)
 
 La imagen está en `ghcr.io/ignaciovillela/usage-monitor-server` (amd64 y arm64): `latest` y `X.Y.Z` con cada release,
-`dev` con cada cambio en la rama dev (para probar; cambia `:latest` por `:dev` en el compose).
+`dev` (siempre la última de la rama dev) y `X.Y.Z-dev.N` (una compilación de dev concreta) con cada cambio en dev. Para probar
+dev cambia `:latest` por `:dev` en el compose; la app de dev muestra la misma versión `X.Y.Z-dev.N` y avisa si hay una más nueva.
 Solo necesitas este archivo, [`docker-compose.yml`](docker-compose.yml) (sirve igual como stack en Dockge o Portainer).
 Completa `CLAUDE_SESSION_KEY` y `API_TOKEN` y ejecuta `docker compose up -d`:
 
