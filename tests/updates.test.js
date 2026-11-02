@@ -21,9 +21,9 @@ test("último release: el de versión más alta, sin borradores (los pre-release
 });
 test("repositorio desde package.json y variable para cambiar la API", () => {
   const pkg = { repository: { url: "https://github.com/ana/usage-monitor.git" } };
-  assert.deepStrictEqual(repoUrls(pkg, {}), { api: "https://api.github.com/repos/ana/usage-monitor/releases?per_page=20", page: "https://github.com/ana/usage-monitor/releases" });
+  assert.deepStrictEqual(repoUrls(pkg, {}), { api: "https://api.github.com/repos/ana/usage-monitor/releases?per_page=20", page: "https://github.com/ana/usage-monitor/releases", repo: "https://github.com/ana/usage-monitor" });
   assert.strictEqual(repoUrls(pkg, { USAGE_MONITOR_RELEASES_URL: "https://x/api" }).api, "https://x/api");
-  assert.deepStrictEqual(repoUrls({}, {}), { api: null, page: null });
+  assert.deepStrictEqual(repoUrls({}, {}), { api: null, page: null, repo: null });
 });
 test("avisos: app vieja, servidor viejo, servidor más nuevo que la app, todo al día", () => {
   const latest = { version: "0.5.0", url: "rel" };

@@ -20,9 +20,10 @@ const clean = v => String(v).replace(/^v/, "");
 function repoUrls(pkg, env = process.env) {
   const raw = pkg && (typeof pkg.repository === "string" ? pkg.repository : pkg.repository && pkg.repository.url) || "";
   const m = /github(?:\.com[/:]|:)([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(raw);
-  const page = m ? `https://github.com/${m[1]}/${m[2]}/releases` : null;
+  const repo = m ? `https://github.com/${m[1]}/${m[2]}` : null;
+  const page = repo && `${repo}/releases`;
   const api = env.USAGE_MONITOR_RELEASES_URL || (m ? `https://api.github.com/repos/${m[1]}/${m[2]}/releases?per_page=20` : null);
-  return { api, page };
+  return { api, page, repo };
 }
 // Último release no borrador, por número de versión (los releases del proyecto se publican como pre-release en GitHub).
 function latestRelease(releases) {

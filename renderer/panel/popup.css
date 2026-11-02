@@ -138,6 +138,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .text-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
 .text-btn.danger { border-color: var(--critical); }
 footer { margin-top: 12px; color: var(--muted); font-size: 10px; text-align: center; opacity: .7; }
+footer a { color: inherit; margin-left: 6px; text-decoration: underline; text-underline-offset: 2px; }
+footer a::before { content: "· "; display: inline-block; margin-right: 6px; text-decoration: none; }
+footer a:hover { color: var(--ink-2); }
 
 .why { margin-top: 4px; }
 .precision { margin: 10px 0 0; }

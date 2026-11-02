@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -559,7 +559,7 @@ $("remote-gen-token").addEventListener("click", () => {
   const token = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
   $("remote-token").type = "text";
   $("remote-token").value = token;
-  $("token-env-line").textContent = `API_TOKEN=${token}`;
+  $("token-env-line").textContent = token;
   $("token-env").hidden = false;
   $("token-copy").textContent = "Copiar";
   setStatus("");
@@ -583,6 +583,8 @@ function renderVersions(data) {
   if (data.dataSource === "remote" && data.serverVersion) parts.push(`servidor v${data.serverVersion}${data.remoteVia ? ` (${data.remoteVia === "online" ? "online" : "local"})` : ""}`);
   else if (data.dataSource === "remote" && data.remoteVia) parts.push(`servidor sin versión (${data.remoteVia})`);
   $("app-version").textContent = parts.join(" · ");
+  $("repo-link").hidden = !data.repoUrl;
+  $("repo-link").dataset.url = data.repoUrl || "";
   $("update-check").checked = data.updateCheck !== false;
   const advice = Array.isArray(data.updateAdvice) ? data.updateAdvice : [];
   const box = $("updates");
@@ -599,6 +601,7 @@ function renderVersions(data) {
     const row = html("div"); row.className = "connect-actions"; row.append(b); box.append(row);
   }
 }
+$("repo-link").addEventListener("click", e => { e.preventDefault(); chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: e.currentTarget.dataset.url }); });
 $("update-check").addEventListener("change", e => chrome.storage.local.set({ updateCheck: e.target.checked }));
 
 $("refresh").addEventListener("click", pollNow);

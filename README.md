@@ -17,6 +17,8 @@ curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/s
 
 Instala la última versión en *Aplicaciones* sin avisos de macOS. Al abrirla, el panel te ofrece conectarla con Claude Code. Más opciones (Windows, `.dmg`, código fuente) en [Instalar](#instalar).
 
+¿Prefieres que un servidor tuyo consulte el uso y la app solo lo muestre? Copia [`server/docker-compose.yml`](server/docker-compose.yml) (Docker, opcional) y mira [Servidor propio](#fuente-de-datos-servidor-propio-opcional).
+
 ## Qué hace
 
 - **Ícono dinámico** (se redibuja cada pocos segundos): uso de la ventana, tiempo transcurrido, y un número opcional (veredicto, probabilidad, porcentaje, tiempo hasta el límite o el reinicio). Forma, tamaño, posición y transparencia configurables.
@@ -68,7 +70,9 @@ Si claude.ai muestra una verificación («comprobando que eres humano»), compl�
 
 ### Fuente de datos: servidor propio (opcional)
 
-Para que otro equipo (un servidor tuyo) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la **URL local** (red de casa), una **URL online** opcional o ambas (se usa la local y, si no responde, la online) y el token (el servidor de `server/` lo exige; *Generar* crea uno y te da la línea `API_TOKEN=…` para copiar al `.env` del servidor; se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL`, `USAGE_MONITOR_REMOTE_URL_ONLINE` y `USAGE_MONITOR_REMOTE_TOKEN`. La flecha de recargar hace `POST` a la URL para pedir datos frescos (si no lo admite, `GET`).
+> **Ejemplo listo para copiar:** [`server/docker-compose.yml`](server/docker-compose.yml) · guía en [`server/README.md`](server/README.md).
+
+Para que otro equipo (un servidor tuyo) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la **URL local** (red de casa), una **URL online** opcional o ambas (se usa la local y, si no responde, la online) y el token (el servidor de `server/` lo exige; *Generar* crea uno y lo copias en `API_TOKEN` del compose; se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL`, `USAGE_MONITOR_REMOTE_URL_ONLINE` y `USAGE_MONITOR_REMOTE_TOKEN`. La flecha de recargar hace `POST` a la URL para pedir datos frescos (si no lo admite, `GET`).
 
 La URL puede devolver el JSON de claude.ai (`five_hour`, `seven_day`, `seven_day_*`), el de la línea de estado de Claude Code (`{ rate_limits: … }`) o un sobre `{ fetchedAt, usage, error }`; con `fetchedAt` la app avisa si los datos tienen más de 15 minutos. En [`server/`](server/README.md) hay un servicio listo para Docker Compose que consulta claude.ai con tu sesión y trae todos los topes semanales.
 

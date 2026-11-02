@@ -10,16 +10,36 @@ Es opcional: la app funciona sin él con Claude Code o con su propia ventana de 
 
 La imagen está en `ghcr.io/ignaciovillela/usage-monitor-server` (amd64 y arm64): `latest` y `X.Y.Z` con cada release,
 `dev` con cada cambio en la rama dev (para probar; cambia `:latest` por `:dev` en el compose).
-En el servidor solo necesitas `docker-compose.yml` y tu `.env`:
+Solo necesitas este archivo, [`docker-compose.yml`](docker-compose.yml) (sirve igual como stack en Dockge o Portainer).
+Completa `CLAUDE_SESSION_KEY` y `API_TOKEN` y ejecuta `docker compose up -d`:
 
-```sh
-mkdir usage-monitor && cd usage-monitor
-curl -fsSLO https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/.env.example -o .env
-# edita .env: CLAUDE_SESSION_KEY y la línea API_TOKEN=… que copias desde la app («Generar»)
-docker compose up -d
-curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
+```yaml
+# Usage Monitor · servidor (opcional). Copia este archivo tal cual (también sirve como stack en Dockge o Portainer),
+# completa las dos líneas de environment y ejecuta: docker compose up -d
+services:
+  usage-monitor:
+    image: ghcr.io/ignaciovillela/usage-monitor-server:latest   # :dev para probar la rama dev
+    # build: .                                                   # o compílala desde el repo (dentro de server/)
+    container_name: usage-monitor
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Cookie «sessionKey» de claude.ai (navegador → herramientas de desarrollo → Cookies → claude.ai).
+      # Da acceso a tu cuenta: queda solo en este servidor. Caduca cada cierto tiempo.
+      CLAUDE_SESSION_KEY: "sk-ant-sid01-..."
+      # Obligatorio. Lo genera la app: Ajustes y datos → Servidor propio → «Generar» → «Copiar».
+      # "none" lo desactiva (solo en una red de confianza, nunca con una URL online).
+      API_TOKEN: "pega-aquí-el-token"
+      # Opcionales:
+      # POLL_SECONDS: "60"          # cada cuánto consulta claude.ai (mínimo 30)
+      # REFRESH_MIN_SECONDS: "15"   # mínimo entre recargas pedidas desde la app
+      # CLAUDE_ORG_ID: ""           # si tienes varias organizaciones
 ```
+
+Comprueba que responde: `curl -H "Authorization: Bearer <tu token>" http://localhost:8787/usage`.
+Si prefieres no dejar los secretos en el compose, ponlos en un `.env` (ver [`.env.example`](.env.example)) y cambia
+`environment:` por `env_file: .env`.
 
 Para compilarla tú mismo desde el repo, cambia `image:` por `build: .` en el compose (está comentado) y usa
 `docker compose up -d --build` dentro de `server/`.
