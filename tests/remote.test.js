@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const http = require("http");
 const { parseRemote, fetchUsage } = require("../src/providers/remote");
-const { createMonitor, createServer, readConfig } = require("../homelab/server");
+const { createMonitor, createServer, readConfig } = require("../server/server");
 
 const NOW = Date.UTC(2026, 10, 2, 12, 0, 0);
 const CLAUDE_AI = {
@@ -22,7 +22,7 @@ test("acepta el formato de la línea de estado de Claude Code", () => {
   const u = parseRemote({ rate_limits: { five_hour: { used_percentage: 7, resets_at: (NOW + 3600e3) / 1000 } } }, NOW);
   assert.strictEqual(u.utilization, 7);
 });
-test("sobre del homelab: usa usage, avisa si está viejo o trae solo error", () => {
+test("sobre del servidor: usa usage, avisa si está viejo o trae solo error", () => {
   assert.strictEqual(parseRemote({ fetchedAt: NOW - 60e3, usage: CLAUDE_AI }, NOW).utilization, 40);
   assert.throws(() => parseRemote({ fetchedAt: NOW - 20 * 60e3, usage: CLAUDE_AI, error: "sesión" }, NOW), /20 min.*sesión/);
   assert.throws(() => parseRemote({ fetchedAt: null, usage: null, error: "Falta CLAUDE_SESSION_KEY." }, NOW), /Falta CLAUDE_SESSION_KEY/);
@@ -33,7 +33,7 @@ test("sin URL o con URL inválida: error de configuración", async () => {
   await assert.rejects(fetchUsage("ftp://x", ""), e => e.kind === "config");
 });
 
-test("de punta a punta: claude.ai simulado → servicio del homelab → app", async t => {
+test("de punta a punta: claude.ai simulado → servicio → app", async t => {
   let calls = 0;
   const upstream = http.createServer((req, res) => {
     calls++;

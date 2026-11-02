@@ -1,4 +1,4 @@
-// Usage Monitor · servicio para homelab. Consulta el uso de claude.ai con tu cookie de sesión cada cierto tiempo
+// Usage Monitor · servicio opcional. Consulta el uso de claude.ai con tu cookie de sesión cada cierto tiempo
 // y lo sirve por HTTP para que la app (fuente «Servidor propio») u otras herramientas solo lo lean.
 //
 //   GET /usage   → { fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
@@ -104,7 +104,7 @@ if (require.main === module) {
   if (!config.apiToken) console.warn("Aviso: sin API_TOKEN, cualquiera en tu red puede leer /usage.");
   const monitor = createMonitor(config);
   const server = createServer(monitor, config);
-  server.listen(config.port, config.host, () => console.log(`Usage Monitor homelab en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));
+  server.listen(config.port, config.host, () => console.log(`Usage Monitor servidor en http://${config.host}:${config.port}/usage (cada ${config.pollSeconds} s)`));
   monitor.start();
   const shutdown = () => { monitor.stop(); server.close(() => process.exit(0)); };
   process.on("SIGTERM", shutdown); process.on("SIGINT", shutdown);

@@ -1,4 +1,4 @@
-# Usage Monitor · homelab
+# Usage Monitor · servidor
 
 Servicio pequeño (Node 20, sin dependencias) que consulta el uso de claude.ai con tu sesión cada minuto y lo
 sirve por HTTP. La app lo muestra con la fuente **Servidor propio (URL)**; otras herramientas (Home Assistant,
@@ -9,7 +9,7 @@ Es opcional: la app funciona sin él con Claude Code o con su propia ventana de 
 ## Puesta en marcha (Docker Compose)
 
 ```sh
-cd homelab
+cd server
 cp .env.example .env        # completa CLAUDE_SESSION_KEY y API_TOKEN
 docker compose up -d --build
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
@@ -18,7 +18,7 @@ curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
 Sin Docker: `CLAUDE_SESSION_KEY=… API_TOKEN=… node server.js`.
 
 En la app: panel → **Ajustes y datos** → Fuente de datos **Servidor propio (URL)** → URL
-`http://<tu-homelab>:8787/usage`, el token, y **Guardar y probar**. También se puede fijar con las variables
+`http://<tu-servidor>:8787/usage`, el token, y **Guardar y probar**. También se puede fijar con las variables
 `USAGE_MONITOR_REMOTE_URL` y `USAGE_MONITOR_REMOTE_TOKEN`.
 
 ## API
@@ -33,7 +33,7 @@ La app acepta también una URL que devuelva directamente el JSON de claude.ai o 
 
 ## Seguridad y límites
 
-- `CLAUDE_SESSION_KEY` da acceso a tu cuenta. Queda solo en el homelab; la app nunca la ve.
+- `CLAUDE_SESSION_KEY` da acceso a tu cuenta. Queda solo en el servidor; la app nunca la ve.
 - Pon `API_TOKEN` y no expongas el puerto a internet (usa tu VPN o red local).
 - La sesión caduca: `/usage` devolverá `error` y la app lo mostrará. Renueva la cookie y reinicia el contenedor.
 - claude.ai está detrás de Cloudflare; si bloquea las consultas desde tu IP verás «sin JSON (posible verificación de Cloudflare)».

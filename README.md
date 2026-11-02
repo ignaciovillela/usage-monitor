@@ -68,9 +68,9 @@ Si claude.ai muestra una verificación («comprobando que eres humano»), compl�
 
 ### Fuente de datos: servidor propio (opcional)
 
-Para que otro equipo (un homelab, un servidor) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la URL y, si el servidor lo pide, un token (se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL` y `USAGE_MONITOR_REMOTE_TOKEN`.
+Para que otro equipo (un servidor tuyo) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la URL y, si el servidor lo pide, un token (se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL` y `USAGE_MONITOR_REMOTE_TOKEN`.
 
-La URL puede devolver el JSON de claude.ai (`five_hour`, `seven_day`, `seven_day_*`), el de la línea de estado de Claude Code (`{ rate_limits: … }`) o un sobre `{ fetchedAt, usage, error }`; con `fetchedAt` la app avisa si los datos tienen más de 15 minutos. En [`homelab/`](homelab/README.md) hay un servicio listo para Docker Compose que consulta claude.ai con tu sesión y trae todos los topes semanales.
+La URL puede devolver el JSON de claude.ai (`five_hour`, `seven_day`, `seven_day_*`), el de la línea de estado de Claude Code (`{ rate_limits: … }`) o un sobre `{ fetchedAt, usage, error }`; con `fetchedAt` la app avisa si los datos tienen más de 15 minutos. En [`server/`](server/README.md) hay un servicio listo para Docker Compose que consulta claude.ai con tu sesión y trae todos los topes semanales.
 
 ## Estructura
 
@@ -81,7 +81,7 @@ renderer/       ícono (icon.html) y panel (panel/: popup + modelo: util.js, cor
 tests/          pruebas unitarias, backtest con usuarios sintéticos, replay con tu CSV
 scripts/        build del .app e importación de historial
 docs/           PRD, notas de diseño, guía para adaptarlo a otros servicios
-homelab/        servicio opcional (Docker) que consulta el uso y lo sirve por HTTP a la app
+server/         servicio opcional (Docker) que consulta el uso y lo sirve por HTTP a la app
 ```
 
 ## Desarrollo
