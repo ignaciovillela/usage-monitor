@@ -106,25 +106,25 @@ async function setRemote({ url, token, clearToken } = {}) {
   settings = { ...next, source: "remote" };
   store.saveSettings(settings);
   errors = 0; loginShown = false;
-  await tick();
+  await tick({ manual: true });
   const s = persisted.state;
   return s.status === "connected" ? { ok: true } : { ok: false, error: s.error || "Sin datos todavía." };
 }
 
 // ── Ciclo de consulta ───────────────────────────────────────────────────────
-async function readUsage(now) {
+async function readUsage(now, manual) {
   if (MOCK) return MOCK.next();
   if (settings.source === "claude-code") return claudeCode.readFeed(claudeCode.feedFile(), now);
-  if (settings.source === "remote") return remote.fetchUsage(remoteUrl(), remoteToken(), now);
+  if (settings.source === "remote") return remote.fetchUsage(remoteUrl(), remoteToken(), now, { refresh: manual });
   return fetchUsageViaPage();
 }
-async function tick() {
+async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
   busy = true;
   const now = Date.now();
   try {
     if (settings.source === "claude-code") watchFeed();
-    const usage = await readUsage(now);
+    const usage = await readUsage(now, manual);
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
     if (loginShown && win && win.isVisible()) win.hide();      // ya hay datos: la ventana de inicio de sesión se oculta sola
@@ -249,7 +249,7 @@ function menuTemplate() {
   return [
     ...lines, { type: "separator" },
     { label: "Abrir panel", click: showPanel },
-    { label: "Actualizar ahora", click: () => tick() },
+    { label: "Actualizar ahora", click: () => tick({ manual: true }) },
     { label: "Más opciones", submenu: more },
     ...(tray ? [{ type: "separator" }, { label: "Salir", click: () => app.quit() }] : [])   // en macOS el Dock ya trae «Salir»
   ];
@@ -314,7 +314,7 @@ ipcMain.handle("storage-set", (_e, obj) => { for (const [k, v] of Object.entries
 ipcMain.handle("storage-remove", () => undefined);
 ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "IMPORT_CSV") return importCsv();
-  if (message && message.type === "POLL_NOW") tick();
+  if (message && message.type === "POLL_NOW") await tick({ manual: true });
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
   if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);

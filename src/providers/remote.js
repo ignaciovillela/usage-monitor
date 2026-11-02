@@ -39,13 +39,19 @@ function parseRemote(body, now) {
   if (data && typeof data === "object" && data.rate_limits) return parseFeed(data, now);
   throw remoteError("Respuesta del servidor con un formato desconocido (se espera five_hour o rate_limits).");
 }
-async function fetchUsage(url, token, now = Date.now()) {
+// refresh: la actualización manual hace POST a la misma URL para pedir datos frescos al servidor. Si el servidor no
+// admite POST (404/405/501, p. ej. un JSON estático), se repite con GET.
+async function fetchUsage(url, token, now = Date.now(), { refresh = false } = {}) {
   if (!url) throw remoteError("Falta la URL del servidor: configúrala en el panel, en «Ajustes y datos».", "config");
   if (!validUrl(url)) throw remoteError("La URL del servidor no es válida (debe empezar por http:// o https://).", "config");
   const headers = { Accept: "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
+  const request = method => fetch(url, { method, headers, signal: AbortSignal.timeout(method === "POST" ? TIMEOUT_MS * 3 : TIMEOUT_MS), cache: "no-store" });
   let res;
-  try { res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" }); }
+  try {
+    res = await request(refresh ? "POST" : "GET");
+    if (refresh && [404, 405, 501].includes(res.status)) res = await request("GET");
+  }
   catch (e) { throw remoteError(`No se pudo conectar con el servidor (${e.name === "TimeoutError" ? "tiempo agotado" : e.cause && e.cause.code || e.message}).`); }
   if (res.status === 401 || res.status === 403) throw remoteError("El servidor rechazó el token.");
   let body = null;

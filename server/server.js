@@ -1,8 +1,9 @@
 // Usage Monitor · servicio opcional. Consulta el uso de claude.ai con tu cookie de sesión cada cierto tiempo
 // y lo sirve por HTTP para que la app (fuente «Servidor propio») u otras herramientas solo lo lean.
 //
-//   GET /usage   → { fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
-//   GET /health  → { ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
+//   GET  /usage  → { fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
+//   POST /usage  → igual, pero antes consulta claude.ai al momento (como mucho una vez cada REFRESH_MIN_SECONDS)
+//   GET  /health → { ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
 //
 // Sin dependencias: Node 20+. Configuración por variables de entorno (ver .env.example).
 "use strict";
@@ -18,6 +19,7 @@ function readConfig(env = process.env) {
     orgId: (env.CLAUDE_ORG_ID || "").trim(),
     baseUrl: (env.CLAUDE_BASE_URL || "https://claude.ai").replace(/\/+$/, ""),
     pollSeconds: Math.max(30, Number(env.POLL_SECONDS) || 60),
+    refreshMinSeconds: Math.max(5, Number(env.REFRESH_MIN_SECONDS) || 15),
     port: Number(env.PORT) || 8787,
     host: env.HOST || "0.0.0.0",
     userAgent: env.USER_AGENT || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
@@ -26,7 +28,7 @@ function readConfig(env = process.env) {
 
 function createMonitor(config, log = console) {
   const state = { fetchedAt: null, usage: null, error: null, errorAt: null };
-  let orgId = config.orgId || null, failures = 0, timer = null, stopped = false;
+  let orgId = config.orgId || null, failures = 0, timer = null, stopped = false, inflight = null, lastAttempt = 0;
 
   async function get(path) {
     const res = await fetch(config.baseUrl + path, {
@@ -48,7 +50,7 @@ function createMonitor(config, log = console) {
     if (!org) throw new Error("sin identificador de organización");
     return org.uuid || org.id;
   }
-  async function pollOnce() {
+  async function doPoll() {
     try {
       if (!config.sessionKey) throw new Error("Falta CLAUDE_SESSION_KEY.");
       if (!orgId) orgId = await findOrg();
@@ -64,6 +66,16 @@ function createMonitor(config, log = console) {
     }
     return state;
   }
+  // Una sola consulta a la vez: quien llegue mientras hay una en curso espera esa misma.
+  function pollOnce() {
+    if (!inflight) { lastAttempt = Date.now(); inflight = doPoll().finally(() => { inflight = null; }); }
+    return inflight;
+  }
+  // Actualización pedida desde fuera (POST /usage): como mucho una cada refreshMinSeconds para no insistir contra claude.ai.
+  function refresh() {
+    if (inflight || Date.now() - lastAttempt >= config.refreshMinSeconds * 1000) return pollOnce();
+    return Promise.resolve(state);
+  }
   // Con errores se espacia la consulta (hasta 30 min) para no insistir contra claude.ai.
   function schedule() {
     if (stopped) return;
@@ -71,7 +83,7 @@ function createMonitor(config, log = console) {
     timer = setTimeout(async () => { await pollOnce(); schedule(); }, failures ? Math.min(30 * 60000, base * 2 ** Math.min(failures, 5)) : base);
   }
   return {
-    state, pollOnce,
+    state, pollOnce, refresh,
     async start() { await pollOnce(); schedule(); },
     stop() { stopped = true; clearTimeout(timer); }
   };
@@ -84,14 +96,19 @@ function authorized(req, token) {
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 function createServer(monitor, config) {
-  return http.createServer((req, res) => {
-    const send = (status, obj) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(obj)); };
+  return http.createServer(async (req, res) => {
+    const send = (status, obj, headers = {}) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(obj)); };
     const { pathname } = new URL(req.url, "http://localhost");
-    if (req.method !== "GET") return send(405, { error: "método no permitido" });
     const s = monitor.state;
-    if (pathname === "/health") return send(s.usage ? 200 : 503, { ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
+    if (pathname === "/health") {
+      if (req.method !== "GET") return send(405, { error: "método no permitido" }, { Allow: "GET" });
+      return send(s.usage ? 200 : 503, { ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
+    }
     if (pathname === "/usage") {
+      if (req.method !== "GET" && req.method !== "POST") return send(405, { error: "método no permitido" }, { Allow: "GET, POST" });
       if (!authorized(req, config.apiToken)) return send(401, { error: "token inválido" });
+      req.resume();      // el cuerpo de un POST se ignora
+      if (req.method === "POST") await monitor.refresh();
       return send(s.usage ? 200 : 503, s);
     }
     send(404, { error: "no encontrado" });

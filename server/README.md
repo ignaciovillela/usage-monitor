@@ -8,12 +8,20 @@ Es opcional: la app funciona sin él con Claude Code o con su propia ventana de 
 
 ## Puesta en marcha (Docker Compose)
 
+La imagen está en `ghcr.io/ignaciovillela/usage-monitor-server` (amd64 y arm64; se publica con cada release).
+En el servidor solo necesitas `docker-compose.yml` y tu `.env`:
+
 ```sh
-cd server
-cp .env.example .env        # completa CLAUDE_SESSION_KEY y API_TOKEN
-docker compose up -d --build
+mkdir usage-monitor && cd usage-monitor
+curl -fsSLO https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/server/.env.example -o .env
+# edita .env: CLAUDE_SESSION_KEY y API_TOKEN
+docker compose up -d
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8787/usage
 ```
+
+Para compilarla tú mismo desde el repo, cambia `image:` por `build: .` en el compose (está comentado) y usa
+`docker compose up -d --build` dentro de `server/`.
 
 Sin Docker: `CLAUDE_SESSION_KEY=… API_TOKEN=… node server.js`.
 
@@ -26,10 +34,11 @@ En la app: panel → **Ajustes y datos** → Fuente de datos **Servidor propio (
 | Ruta | Auth | Respuesta |
 |---|---|---|
 | `GET /usage` | `Bearer API_TOKEN` | `{ fetchedAt, usage, error, errorAt }`; `usage` es la respuesta de claude.ai (`five_hour`, `seven_day`, `seven_day_*`). 503 si aún no hay datos. |
+| `POST /usage` | `Bearer API_TOKEN` | Igual que `GET`, pero antes consulta claude.ai al momento (la flecha de recargar de la app). Como mucho una consulta cada `REFRESH_MIN_SECONDS` (15 s); dentro de ese margen devuelve lo último. |
 | `GET /health` | no | `{ ok, fetchedAt, error }` sin datos de uso. |
 
 La app acepta también una URL que devuelva directamente el JSON de claude.ai o el de la línea de estado de Claude Code
-(`{ rate_limits: … }`), así que puedes servir los datos con otra herramienta.
+(`{ rate_limits: … }`), así que puedes servir los datos con otra herramienta. Si esa URL no acepta `POST` (404/405/501), la app recarga con `GET`.
 
 ## Seguridad y límites
 

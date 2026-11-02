@@ -70,3 +70,46 @@ test("de punta a punta: claude.ai simulado → servicio → app", async t => {
   assert.strictEqual(monitor.state.usage.five_hour.utilization, 40);
   assert.ok(calls >= 3);
 });
+
+test("actualización manual: POST consulta claude.ai al momento, con límite de frecuencia", async t => {
+  let usageCalls = 0;
+  const upstream = http.createServer((req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/api/organizations") return res.end(JSON.stringify([{ uuid: "org-1", capabilities: ["chat"] }]));
+    usageCalls++;
+    res.end(JSON.stringify({ ...CLAUDE_AI, five_hour: { ...CLAUDE_AI.five_hour, utilization: 40 + usageCalls } }));
+  });
+  const base = await listen(upstream);
+  const config = { ...readConfig({}), sessionKey: "sk", apiToken: "", baseUrl: base, refreshMinSeconds: 60 };
+  const monitor = createMonitor(config, quiet);
+  const server = createServer(monitor, config);
+  const url = await listen(server);
+  t.after(() => { upstream.close(); server.close(); monitor.stop(); });
+
+  // El primer POST consulta aunque no haya datos; GET nunca consulta.
+  assert.strictEqual((await fetchUsage(`${url}/usage`, "", Date.now(), { refresh: true })).utilization, 41);
+  assert.strictEqual((await fetchUsage(`${url}/usage`, "")).utilization, 41);
+  // Dentro del límite de frecuencia, el POST devuelve lo último sin volver a consultar.
+  assert.strictEqual((await fetchUsage(`${url}/usage`, "", Date.now(), { refresh: true })).utilization, 41);
+  assert.strictEqual(usageCalls, 1);
+  // Pasado el límite, consulta de nuevo; dos POST a la vez comparten una sola consulta.
+  config.refreshMinSeconds = 0;
+  const [a, b] = await Promise.all([1, 2].map(() => fetchUsage(`${url}/usage`, "", Date.now(), { refresh: true })));
+  assert.strictEqual(usageCalls, 2);
+  assert.strictEqual(a.utilization, 42); assert.strictEqual(b.utilization, 42);
+  // Otros métodos: 405.
+  assert.strictEqual((await fetch(`${url}/usage`, { method: "DELETE" })).status, 405);
+});
+test("actualización manual contra un servidor que solo acepta GET: repite con GET", async t => {
+  const methods = [];
+  const plain = http.createServer((req, res) => {
+    methods.push(req.method);
+    if (req.method !== "GET") { res.writeHead(405); return res.end(); }
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(CLAUDE_AI));
+  });
+  const url = await listen(plain);
+  t.after(() => plain.close());
+  assert.strictEqual((await fetchUsage(url, "", NOW, { refresh: true })).utilization, 40);
+  assert.deepStrictEqual(methods, ["POST", "GET"]);
+});
