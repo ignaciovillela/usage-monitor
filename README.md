@@ -70,7 +70,7 @@ Si claude.ai muestra una verificación («comprobando que eres humano»), compl�
 
 ### Fuente de datos: servidor propio (opcional)
 
-> **Ejemplo listo para copiar:** [`server/docker-compose.yml`](server/docker-compose.yml) · guía en [`server/README.md`](server/README.md).
+> **Ejemplo listo para copiar:** [`server/docker-compose.yml`](server/docker-compose.yml) · guía en [`server/README.md`](server/README.md). El servidor también sirve una página web en `http://<servidor>:8787/` para ver el uso desde cualquier navegador.
 
 Para que otro equipo (un servidor tuyo) consulte el uso y la app solo lo muestre. En el panel, **Ajustes y datos → Fuente de datos → Servidor propio (URL)**: escribe la **URL local** (red de casa), una **URL online** opcional o ambas (se usa la local y, si no responde, la online) y el token (el servidor de `server/` lo exige; *Generar* crea uno y lo copias en `API_TOKEN` del compose; se envía como `Authorization: Bearer …` y se guarda cifrado con el llavero del sistema cuando está disponible). *Guardar y probar* hace una consulta al momento. También se puede fijar con `USAGE_MONITOR_REMOTE_URL`, `USAGE_MONITOR_REMOTE_URL_ONLINE` y `USAGE_MONITOR_REMOTE_TOKEN`. La flecha de recargar hace `POST` a la URL para pedir datos frescos (si no lo admite, `GET`).
 

@@ -3,6 +3,7 @@
 //
 //   GET  /usage  → { version, fetchedAt, usage, error, errorAt }   (usage = respuesta de claude.ai: five_hour, seven_day, …)
 //   POST /usage  → igual, pero antes consulta claude.ai al momento (como mucho una vez cada REFRESH_MIN_SECONDS)
+//   GET  /       → página web para ver el uso desde el navegador (pide el token y lo guarda en ese navegador)
 //   GET  /health → { version, ok, fetchedAt, error }               (sin datos de uso; útil para healthchecks)
 //
 // Sin dependencias: Node 20+. Configuración por variables de entorno (ver .env.example).
@@ -10,6 +11,7 @@
 const http = require("http");
 const fs = require("fs");
 const crypto = require("crypto");
+const path = require("path");
 const VERSION = require("./package.json").version;      // la app la compara con la suya y con el último release
 
 function readConfig(env = process.env) {
@@ -99,11 +101,29 @@ function authorized(req, token) {
   const want = Buffer.from(token);
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
-function createServer(monitor, config) {
+// Página web: archivos fijos de web/, leídos al arrancar. No llevan datos: los pide a /usage con el token.
+const WEB_FILES = { "/": ["index.html", "text/html"], "/index.html": ["index.html", "text/html"], "/app.js": ["app.js", "text/javascript"], "/style.css": ["style.css", "text/css"] };
+const WEB_HEADERS = {
+  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache"
+};
+function loadWeb(dir = path.join(__dirname, "web")) {
+  const out = {};
+  for (const [route, [file, type]] of Object.entries(WEB_FILES)) {
+    try { out[route] = { body: fs.readFileSync(path.join(dir, file)), type: `${type}; charset=utf-8` }; } catch (_) { /* sin página: solo API */ }
+  }
+  return out;
+}
+function createServer(monitor, config, web = loadWeb()) {
   return http.createServer(async (req, res) => {
     const send = (status, obj, headers = {}) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Usage-Monitor-Version": VERSION, ...headers }); res.end(JSON.stringify(obj)); };
     const { pathname } = new URL(req.url, "http://localhost");
     const s = monitor.state;
+    if (Object.prototype.hasOwnProperty.call(web, pathname)) {
+      if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: "método no permitido" }, { Allow: "GET, HEAD" });
+      res.writeHead(200, { "Content-Type": web[pathname].type, "X-Usage-Monitor-Version": VERSION, ...WEB_HEADERS });
+      return res.end(req.method === "HEAD" ? undefined : web[pathname].body);
+    }
     if (pathname === "/health") {
       if (req.method !== "GET") return send(405, { error: "método no permitido" }, { Allow: "GET" });
       return send(s.usage ? 200 : 503, { version: VERSION, ok: !!s.usage, fetchedAt: s.fetchedAt, error: s.error });
