@@ -1,9 +1,21 @@
+# Usage Monitor · servidor (opcional). Copia este archivo tal cual (también sirve como stack en Dockge o Portainer),
+# completa las dos líneas de environment y ejecuta: docker compose up -d
 services:
   usage-monitor:
-    image: ghcr.io/ignaciovillela/usage-monitor-server:latest
-    # build: .              # para compilarla tú mismo desde el repo en vez de descargarla
+    image: ghcr.io/ignaciovillela/usage-monitor-server:latest   # :dev para probar la rama dev
+    # build: .                                                   # o compílala desde el repo (dentro de server/)
     container_name: usage-monitor
     restart: unless-stopped
-    env_file: .env
     ports:
       - "8787:8787"
+    environment:
+      # Cookie «sessionKey» de claude.ai (navegador → herramientas de desarrollo → Cookies → claude.ai).
+      # Da acceso a tu cuenta: queda solo en este servidor. Caduca cada cierto tiempo.
+      CLAUDE_SESSION_KEY: "sk-ant-sid01-..."
+      # Obligatorio. Lo genera la app: Ajustes y datos → Servidor propio → «Generar» → «Copiar».
+      # "none" lo desactiva (solo en una red de confianza, nunca con una URL online).
+      API_TOKEN: "pega-aquí-el-token"
+      # Opcionales:
+      # POLL_SECONDS: "60"          # cada cuánto consulta claude.ai (mínimo 30)
+      # REFRESH_MIN_SECONDS: "15"   # mínimo entre recargas pedidas desde la app
+      # CLAUDE_ORG_ID: ""           # si tienes varias organizaciones

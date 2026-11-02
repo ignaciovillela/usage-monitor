@@ -173,7 +173,7 @@ function refreshAdvice() {
 }
 // Solo se abren las páginas de releases conocidas (las que vienen en los avisos o la del repositorio).
 function openRelease(url) {
-  if (url && (url === releases.page || updateAdvice.some(a => a.url === url)) && /^https:\/\//.test(url)) shell.openExternal(url);
+  if (url && (url === releases.page || url === releases.repo || updateAdvice.some(a => a.url === url)) && /^https:\/\//.test(url)) shell.openExternal(url);
 }
 async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
@@ -360,7 +360,7 @@ function storageSnapshot() {
     appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
     remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
     serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
-    updateAdvice, updateCheck: settings.updateCheck,
+    updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -381,8 +381,8 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
   if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);
-  // Solo se copia la línea del token generado en el panel (nada arbitrario al portapapeles).
-  if (message && message.type === "COPY_TOKEN_LINE" && /^API_TOKEN=[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
+  // Solo se copia un token generado en el panel (nada arbitrario al portapapeles).
+  if (message && message.type === "COPY_TOKEN_LINE" && /^[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
   if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
   return { ok: true };
 });
