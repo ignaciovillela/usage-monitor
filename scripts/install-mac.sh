@@ -45,4 +45,4 @@ rm -rf "${INSTALL_DIR:?}/$APP"
 ditto "$MNT/$APP" "$INSTALL_DIR/$APP"
 echo "Instalado en $INSTALL_DIR/$APP"
 
-if [ "${OPEN:-1}" = "1" ]; then open "$INSTALL_DIR/$APP"; echo "Abriendo Usage Monitor… inicia sesión en claude.ai en la ventana que aparece."; fi
+if [ "${OPEN:-1}" = "1" ]; then open "$INSTALL_DIR/$APP"; echo "Abriendo Usage Monitor… el panel te ayudará a conectarlo con Claude Code."; fi

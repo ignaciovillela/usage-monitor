@@ -6,6 +6,8 @@ const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
 const claudeCode = require("./providers/claude-code");
+const claudeOauth = require("./providers/claude-oauth");
+const { pickUsage } = require("./pick-usage");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -85,6 +87,14 @@ async function fetchUsageViaPage() {
   return parseUsage(result.data);
 }
 
+// Fuentes en el orden en que se consultan: una sola, o las dos según la prioridad elegida («auto»).
+// «auto» consulta primero la elegida y luego las demás; claude.ai (ventana con login) solo entra si es la prioritaria.
+const AUTO_FALLBACK = ["oauth", "claude-code"];
+const sourceOrder = () => settings.source !== "auto" ? [settings.source] : [settings.priority, ...AUTO_FALLBACK.filter(v => v !== settings.priority)];
+const SOURCE_NAMES = { web: "claude.ai", "claude-code": "Claude Code (archivo)", oauth: "Claude Code (cuenta)" };
+// Devuelve el uso con `via` (qué fuente respondió) y `fellBack` (respondió una de respaldo). Si todas fallan se informa el error de claude.ai, que es el accionable.
+const readUsage = now => pickUsage(sourceOrder(), { web: fetchUsageViaPage, oauth: () => claudeOauth.readUsage(), "claude-code": () => claudeCode.readFeed(claudeCode.feedFile(), now) });
+
 // ── Ciclo de consulta ───────────────────────────────────────────────────────
 async function tick() {
   if (busy) return;
@@ -92,18 +102,19 @@ async function tick() {
   const now = Date.now();
   try {
     if (settings.source === "claude-code") watchFeed();
-    const usage = MOCK ? MOCK.next() : settings.source === "claude-code" ? claudeCode.readFeed(claudeCode.feedFile(), now) : await fetchUsageViaPage();
+    const usage = MOCK ? MOCK.next() : await readUsage(now);
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
+    persisted.state.via = usage.via; persisted.state.fellBack = usage.fellBack;
     if (loginShown && win && win.isVisible()) win.hide();      // ya hay datos: la ventana de inicio de sesión se oculta sola
     errors = 0; loginShown = false;
     if (settings.alerts) res.events.forEach(notify);
     saveSoon();
   } catch (e) {
     if (e.kind !== "nofeed") errors++;      // esperar datos de Claude Code no es un fallo: es una lectura local barata, sin espaciar los intentos
-    persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", error: e.message || String(e), updatedAt: now };
-    // Sin sesión, o dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
-    if (settings.source !== "claude-code" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
+    persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", waiting: e.kind === "nofeed", error: e.message || String(e), updatedAt: now };
+    // Sin sesión (cualquier modo con claude.ai) o, solo en «solo claude.ai», dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
+    if (((settings.source === "web" && errors >= 2) || (sourceOrder().includes("web") && e.kind === "auth")) && !loginShown) { loginShown = true; showLogin(); }
   } finally {
     busy = false;
     await render(true);
@@ -174,6 +185,7 @@ function statusLines() {
   const s = currentState(), now = Date.now(), lines = [];
   if (s.status === "connected") {
     const parts = engine.projectionParts(s, now);
+    lines.push(`Fuente: ${SOURCE_NAMES[s.via] || "claude.ai"}${s.fellBack ? ` (respaldo: ${SOURCE_NAMES[sourceOrder()[0]]} no respondió)` : ""}`);
     lines.push(`Uso ${engine.fmtPct(s.utilization)}${Number.isFinite(s.resetsAt) ? ` · reinicio ${engine.fmtClock(s.resetsAt)} (en ${engine.fmtReset(s.resetsAt)})` : ""}`);
     lines.push(`${parts.icon} ${parts.headline}`);
     if (parts.detail) lines.push(parts.detail);
@@ -188,7 +200,7 @@ function updateSetting(key, value) {
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
-  if (key === "source") { errors = 0; loginShown = false; if (value === "web" && !win) createSessionWindow(); tick(); }
+  if (key === "source" || key === "priority") { errors = 0; loginShown = false; if (sourceOrder().includes("web") && !win) createSessionWindow(); tick(); }
   render(true); refreshChrome(true);
 }
 function menuTemplate() {
@@ -201,7 +213,8 @@ function menuTemplate() {
     { label: "Forma del ícono", submenu: radio([["Dos anillos", "rings"], ["Donut + anillo de tiempo", "donut"], ["Torta 1 (uso)", "pie1"], ["Torta 2 (uso + anillo de tiempo)", "pie2"], ["Torta 3 (uso + torta de tiempo)", "pie3"]], settings.shape, v => updateSetting("shape", v)) },
     { label: "Qué muestra el número", submenu: radio([["Veredicto (solo si hay riesgo)", "pace"], ["Probabilidad de agotarlo", "prob"], ["Porcentaje de uso", "percent"], ["Tiempo hasta el límite", "limit"], ["Tiempo hasta el reinicio", "reset"]], settings.mode, v => updateSetting("mode", v)) },
     { label: "Transparencia del número", submenu: radio([["30 %", 0.3], ["50 %", 0.5], ["70 %", 0.7], ["90 %", 0.9], ["100 %", 1]], settings.alpha, v => updateSetting("alpha", v)) },
-    { label: "Fuente de datos", submenu: radio([["claude.ai (ventana propia)", "web"], ["Claude Code (línea de estado)", "claude-code"]], settings.source, v => updateSetting("source", v)) },
+    { label: "Fuente de datos", submenu: radio([["Automática (con prioridad y respaldo)", "auto"], ["Solo cuenta de Claude Code (sin login)", "oauth"], ["Solo archivo de Claude Code (línea de estado)", "claude-code"], ["Solo claude.ai (ventana propia)", "web"]], settings.source, v => updateSetting("source", v)) },
+    { label: "Prioridad (en automática)", enabled: settings.source === "auto", submenu: radio([["Cuenta de Claude Code, luego archivo", "oauth"], ["Archivo de Claude Code, luego cuenta", "claude-code"], ["claude.ai, luego cuenta y archivo", "web"]], settings.priority, v => updateSetting("priority", v)) },
     { label: "Conectar con Claude Code…", click: connectClaudeCode },
     { label: "Desconectar de Claude Code…", click: disconnectClaudeCode },
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
@@ -253,7 +266,7 @@ function storageSnapshot() {
     usageState: currentState(), usageSamples: panelSamples(),
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
-    appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
+    appVersion: app.getVersion(), dataSource: settings.source, dataPriority: settings.priority, claudeCodeConnected: claudeCode.isConnected(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -272,7 +285,7 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "IMPORT_CSV") return importCsv();
   if (message && message.type === "POLL_NOW") tick();
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
-  if (message && message.type === "SET_SOURCE" && ["claude-code", "web"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "oauth", "auto"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -436,10 +449,10 @@ app.whenReady().then(async () => {
   }
   await render(true);
   refreshChrome(true);
-  if (MOCK || settings.source === "claude-code") tick();
+  if (MOCK || settings.source !== "web") tick();
   // Primera vez con Claude Code como fuente y sin conectar: se ofrece conectarlo una sola vez.
-  if (!MOCK && settings.source === "claude-code" && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
-  if (!MOCK && settings.source !== "claude-code") createSessionWindow();
+  if (!MOCK && sourceOrder().includes("claude-code") && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
+  if (!MOCK && sourceOrder().includes("web")) createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).

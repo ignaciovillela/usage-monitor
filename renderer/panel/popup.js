@@ -80,7 +80,7 @@ function renderSummary() {
   // Sin conexión no se muestran cifras viejas como si fueran actuales.
   const s = connected ? model.state : { status: model.state.status, error: model.state.error };
   $("status").textContent =
-    connected ? `Conectada a Claude.ai · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
+    connected ? `Fuente: ${s.via === "claude-code" ? "Claude Code (archivo)" : s.via === "oauth" ? "Claude Code (cuenta)" : "Claude.ai"}${s.fellBack ? " (respaldo)" : ""} · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
     s.status === "auth" ? "Sesión no disponible" :
     s.status === "error" ? "Error de conexión" : "Consultando…";
 
