@@ -22,3 +22,11 @@ test("source válido se respeta", () => {
   fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ source: "web" }));
   assert.equal(store.loadSettings().source, "web");
 });
+test("source «auto» y su prioridad se respetan; una prioridad inválida vuelve a la cuenta de Claude Code primero", () => {
+  fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ source: "auto", priority: "claude-code" }));
+  const s = store.loadSettings();
+  assert.equal(s.source, "auto");
+  assert.equal(s.priority, "claude-code");
+  fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ source: "auto", priority: "otra" }));
+  assert.equal(store.loadSettings().priority, "oauth");
+});
