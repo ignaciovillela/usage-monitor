@@ -59,6 +59,8 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-win.ps1))) -AutoUpdate
   ```
   Con el mismo comando, cambiando `-AutoUpdate` por `-DisableAutoUpdate` la quitas, y con `-Uninstall` borras la app, el acceso directo y la tarea (tus datos quedan en `%APPDATA%\Usage Monitor`).
+
+  **Canal (main o dev):** en una instalación nueva se instala la última estable (main); añade `-Channel dev` para la última de desarrollo. Después se cambia desde la app (*Ajustes y datos → Canal de actualizaciones*, o *Más opciones* en el menú de la bandeja), y el botón *Instalar* del aviso y la tarea automática siguen ese canal. Pasar de dev a main instala la estable aunque tenga un número menor.
 - **Windows, con el zip descargado del navegador:** descomprime y ejecuta `Usage Monitor.exe`. Los releases van firmados con Azure Artifact Signing, así que Smart App Control no los bloquea (SmartScreen puede avisar mientras el certificado gana reputación: *Más información → Ejecutar de todos modos*). Si compilas tú la app, sale sin firmar y Smart App Control la bloqueará; ver [docs/windows-signing.md](docs/windows-signing.md). El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
 
 **Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
@@ -126,7 +128,9 @@ Para otro servicio o suscripción: [docs/ADAPTING.md](docs/ADAPTING.md).
 
 El pie del panel muestra la versión de la app y, con servidor propio, la del servidor y la URL que respondió (local u online). Cada 6 h la app consulta la lista de releases del repositorio de `package.json` (`repository`) y avisa en el panel, en el menú y con una notificación (una vez por versión) si hay una versión nueva de la app o si el servidor está desactualizado o es más nuevo que la app. Se desactiva en *Ajustes y datos → Buscar actualizaciones*; `USAGE_MONITOR_RELEASES_URL` apunta a otra API compatible. La consulta no envía datos de uso.
 
-**Canal dev.** Cada cambio en la rama `dev` publica un pre-release `vX.Y.Z-dev.N` (N = número de commits; se conservan los últimos 10) con los instaladores, y la imagen del servidor `X.Y.Z-dev.N` y `:dev` con la misma versión. Una app de dev avisa cuando hay un dev más nuevo o la estable correspondiente; una app estable solo mira las estables.
+**Canal dev.** Cada cambio en la rama `dev` publica un pre-release `vX.Y.Z-dev.N` (N = número de commits; se conservan los últimos 10) con los instaladores, y la imagen del servidor `X.Y.Z-dev.N` y `:dev` con la misma versión. El canal se elige en *Ajustes y datos → Canal de actualizaciones*: **Estable (main)** solo mira las estables (y, con una app de dev instalada, ofrece volver a la última estable); **Desarrollo (dev)** también las de dev. Sin elegir, una app de dev sigue dev y una estable sigue main. En Windows, con la app instalada por `install-win.ps1`, el aviso trae un botón *Instalar* que la actualiza sin salir de la app.
+
+**Resumen de la actualización.** Al abrir una versión distinta de la última vez, el panel muestra *Actualizado a vX* con lo que cambió: las viñetas de las notas de los releases intermedios y los títulos de los commits entre ambas versiones (sin los merges), hasta que pulses *Entendido*. Si la versión anterior era un dev que ya se borró (se conservan 10), no hay lista de commits y queda solo el enlace a GitHub. Con *Buscar actualizaciones* desactivado no se consulta GitHub y el resumen solo dice de qué versión vienes.
 
 ## Privacidad
 

@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -586,21 +586,58 @@ function renderVersions(data) {
   $("repo-link").hidden = !data.repoUrl;
   $("repo-link").dataset.url = data.repoUrl || "";
   $("update-check").checked = data.updateCheck !== false;
+  $("update-channel").value = data.updateChannel === "dev" ? "dev" : "main";
+  renderUpdateSummary(data.updateSummary);
   const advice = Array.isArray(data.updateAdvice) ? data.updateAdvice : [];
   const box = $("updates");
   box.hidden = !advice.length;
   box.replaceChildren();
   if (!advice.length) return;
-  const h = html("h2"); h.textContent = advice.some(a => a.kind === "app") ? "Actualización disponible" : "Actualiza el servidor";
+  const h = html("h2"); h.textContent = advice.some(a => a.switch) ? "Cambiar a la versión estable" : advice.some(a => a.kind === "app") ? "Actualización disponible" : "Actualiza el servidor";
   box.append(h);
   for (const a of advice) { const p = html("p"); p.textContent = a.text; box.append(p); }
+  const row = html("div"); row.className = "connect-actions";
+  const appAdvice = advice.find(a => a.kind === "app");
+  if (appAdvice && data.canInstallUpdate) {      // Windows con la app instalada por el script: se instala desde aquí
+    const b = html("button"); b.className = "text-btn primary"; b.textContent = `Instalar v${appAdvice.version}`;
+    b.addEventListener("click", () => { b.disabled = true; b.textContent = "Instalando…"; chrome.runtime.sendMessage({ type: "INSTALL_UPDATE" }); });
+    row.append(b);
+  }
   const url = (advice.find(a => a.url) || {}).url;
   if (url) {
-    const b = html("button"); b.className = "text-btn primary"; b.textContent = "Ver novedades";
+    const b = html("button"); b.className = row.childElementCount ? "text-btn" : "text-btn primary"; b.textContent = "Ver novedades";
     b.addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url }));
-    const row = html("div"); row.className = "connect-actions"; row.append(b); box.append(row);
+    row.append(b);
   }
+  if (row.childElementCount) box.append(row);
 }
+// Tarjeta «Actualizado a vX»: lo que cambió desde la versión anterior, hasta que la cierres.
+function renderUpdateSummary(s) {
+  const box = $("update-summary");
+  box.hidden = !s;
+  box.replaceChildren();
+  if (!s) return;
+  const h = html("h2"); h.textContent = s.downgrade ? `Volviste a v${s.to}` : `Actualizado a v${s.to}`;
+  const p = html("p"); p.textContent = s.items && s.items.length ? `Novedades desde v${s.from}:` : `Antes tenías v${s.from}. No hay lista de cambios para este salto; míralos en GitHub.`;
+  box.append(h, p);
+  if (s.items && s.items.length) {
+    const ul = html("ul"); ul.className = "summary-list";
+    for (const it of s.items) { const li = html("li"); li.textContent = it; ul.append(li); }
+    if (s.more) { const li = html("li"); li.className = "muted"; li.textContent = `y ${s.more} más`; ul.append(li); }
+    box.append(ul);
+  }
+  const row = html("div"); row.className = "connect-actions";
+  if (s.url) {
+    const b = html("button"); b.className = "text-btn"; b.textContent = "Ver en GitHub";
+    b.addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: s.url }));
+    row.append(b);
+  }
+  const ok = html("button"); ok.className = "text-btn primary"; ok.textContent = "Entendido";
+  ok.addEventListener("click", () => chrome.runtime.sendMessage({ type: "DISMISS_UPDATE_SUMMARY" }));
+  row.append(ok);
+  box.append(row);
+}
+$("update-channel").addEventListener("change", e => chrome.storage.local.set({ updateChannel: e.target.value }));
 $("repo-link").addEventListener("click", e => { e.preventDefault(); chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: e.currentTarget.dataset.url }); });
 $("update-check").addEventListener("change", e => chrome.storage.local.set({ updateCheck: e.target.checked }));
 

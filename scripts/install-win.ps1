@@ -6,7 +6,7 @@
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-win.ps1))) -AutoUpdate
 #
 # Qué hace (léelo antes de ejecutarlo, es corto):
-#   1. busca en GitHub el .zip de Windows del release más reciente;
+#   1. busca en GitHub el .zip de Windows de la última versión del canal (main: estables; dev: también las -dev.N);
 #   2. si ya tienes esa versión, no hace nada; si no, lo descarga a una carpeta temporal;
 #   3. cierra la copia instalada si está abierta, la reemplaza en %LOCALAPPDATA%\Programs\Usage Monitor
 #      y crea un acceso directo en el menú Inicio;
@@ -15,7 +15,10 @@
 # así que SmartScreen no avisa. Tus datos (%APPDATA%\Usage Monitor) no se tocan.
 #
 # Opciones:
-#   -AutoUpdate         además crea una tarea programada que repite esto al iniciar sesión y cada día.
+#   -Channel main|dev   canal de versiones. Sin indicarlo: el que elegiste en la app (Ajustes → Canal de
+#                       actualizaciones); si nunca elegiste, el de la versión instalada; en una instalación nueva, main.
+#   -AutoUpdate         además crea una tarea programada que repite esto al iniciar sesión y cada día
+#                       (sigue el canal elegido en la app).
 #   -DisableAutoUpdate  borra esa tarea y termina.
 #   -Uninstall          borra la app, el acceso directo y la tarea (no tus datos) y termina.
 #   -InstallDir <ruta>  otra carpeta de instalación.
@@ -27,6 +30,7 @@ param(
   [switch]$AutoUpdate,
   [switch]$DisableAutoUpdate,
   [switch]$Uninstall,
+  [ValidateSet('', 'main', 'dev')][string]$Channel = '',
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Usage Monitor'),
   [switch]$NoStart,
   [switch]$Quiet
@@ -78,15 +82,34 @@ if ($Uninstall) {
 
 if (-not [Environment]::Is64BitOperatingSystem) { throw 'Los instaladores publicados son para Windows x64.' }
 
-Say 'Buscando la última versión…'
+$installed = if ((Test-Path $VerFile) -and (Test-Path $Exe)) { (Get-Content $VerFile -Raw).Trim() } else { '' }
+
+# Canal: el parámetro; si no, el elegido en la app; si no, el de la versión instalada; si no, main.
+if (-not $Channel) {
+  try {
+    $appSettings = Get-Content (Join-Path $env:APPDATA 'Usage Monitor\settings.json') -Raw -ErrorAction Stop | ConvertFrom-Json
+    if ($appSettings.updateChannel -in 'main', 'dev') { $Channel = $appSettings.updateChannel }
+  } catch { }
+}
+if (-not $Channel) { $Channel = if ($installed -match '-dev\.') { 'dev' } else { 'main' } }
+
+# Orden por versión (no por fecha): vX.Y.Z-dev.N va antes que vX.Y.Z. Otras etiquetas se ignoran.
+function Get-VersionKey($tag) {
+  if ($tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$') { return $null }
+  $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
+  return '{0:D6}.{1:D6}.{2:D6}.{3:D10}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $build
+}
+
+Say "Buscando la última versión (canal $Channel)…"
 $releases = Invoke-RestMethod -UseBasicParsing -Headers @{ 'User-Agent' = 'usage-monitor-installer' } `
-  "https://api.github.com/repos/$Repo/releases?per_page=10"
-$release = $releases | Where-Object { -not $_.draft -and ($_.assets | Where-Object name -like '*windows-x64.zip') } | Select-Object -First 1
-if (-not $release) { throw "No encontré un instalador de Windows en https://github.com/$Repo/releases" }
+  "https://api.github.com/repos/$Repo/releases?per_page=40"
+$release = $releases |
+  Where-Object { -not $_.draft -and (Get-VersionKey $_.tag_name) -and ($Channel -eq 'dev' -or $_.tag_name -notmatch '-dev\.') } |
+  Where-Object { $_.assets | Where-Object name -like '*windows-x64.zip' } |
+  Sort-Object { Get-VersionKey $_.tag_name } -Descending | Select-Object -First 1
+if (-not $release) { throw "No encontré un instalador de Windows del canal $Channel en https://github.com/$Repo/releases" }
 $asset = $release.assets | Where-Object name -like '*windows-x64.zip' | Select-Object -First 1
 $tag = $release.tag_name
-
-$installed = if ((Test-Path $VerFile) -and (Test-Path $Exe)) { (Get-Content $VerFile -Raw).Trim() } else { '' }
 if ($installed -eq $tag) {
   Say "Ya tienes la última versión ($tag)."
 } else {

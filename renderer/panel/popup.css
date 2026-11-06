@@ -218,3 +218,6 @@ input[type="range"] { width: 100%; accent-color: var(--series-1); }
   select { max-width: 100%; }
   .slider { grid-template-columns: 70px 1fr 40px; }
 }
+
+.summary-list { margin: 0 0 9px; padding-left: 18px; color: var(--ink-2); }
+.summary-list li { margin: 0 0 3px; }

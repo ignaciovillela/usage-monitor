@@ -151,15 +151,20 @@ function setRemoteInfo(info) {
 const UPDATE_CHECK_MS = 6 * 3600e3;
 const releases = updates.repoUrls(require("../package.json"));
 let latest = null, updateAdvice = [];
+const updateChannel = () => updates.effectiveChannel(settings.updateChannel, app.getVersion());
 async function checkUpdates() {
   if (!settings.updateCheck || !releases.api || MOCK) return;
-  try { latest = await updates.fetchLatest(releases.api, app.getVersion()); }
+  const channel = updateChannel();
+  let found;
+  try { found = await updates.fetchLatest(releases.api, app.getVersion(), channel); }
   catch (e) { console.error("no se pudo consultar las versiones:", e.message); return; }
+  if (channel !== updateChannel()) return;      // se cambió de canal mientras tanto: vale la consulta nueva
+  latest = found;
   refreshAdvice();
 }
 function refreshAdvice() {
   const serverVersion = settings.source === "remote" && remoteInfo ? remoteInfo.version : null;
-  updateAdvice = updates.advice({ appVersion: app.getVersion(), serverVersion, latest: settings.updateCheck ? latest : null, releasesPage: releases.page });
+  updateAdvice = updates.advice({ appVersion: app.getVersion(), serverVersion, latest: settings.updateCheck ? latest : null, releasesPage: releases.page, channel: updateChannel() });
   for (const a of updateAdvice) {
     const key = `${a.kind}@${a.version}`;
     if ((settings.notifiedUpdates || []).includes(key)) continue;
@@ -172,9 +177,56 @@ function refreshAdvice() {
   }
   refreshChrome(true); notifyPanel();
 }
-// Solo se abren las páginas de releases conocidas (las que vienen en los avisos o la del repositorio).
+// Solo se abren las páginas de releases conocidas (las de los avisos, la del resumen o la del repositorio).
 function openRelease(url) {
-  if (url && (url === releases.page || url === releases.repo || updateAdvice.some(a => a.url === url)) && /^https:\/\//.test(url)) shell.openExternal(url);
+  const known = url === releases.page || url === releases.repo || updateAdvice.some(a => a.url === url) || (settings.updateSummary && settings.updateSummary.url === url);
+  if (url && known && /^https:\/\//.test(url)) shell.openExternal(url);
+}
+
+// Instalar desde la app (solo Windows con la app instalada por scripts/install-win.ps1, que deja «.release-tag» junto
+// al .exe): se copia el instalador que viene dentro de la app y se ejecuta aparte; cierra la app, la reemplaza por la
+// última versión del canal elegido y la vuelve a abrir.
+const installDir = () => path.dirname(process.execPath);
+const canSelfInstall = () => process.platform === "win32" && app.isPackaged && fs.existsSync(path.join(installDir(), ".release-tag"));
+const bundledInstaller = () => fs.readFileSync(path.join(__dirname, "..", "scripts", "install-win.ps1"));
+// La tarea de actualización automática ejecuta una copia local del instalador: se mantiene igual a la de esta versión.
+function refreshUpdaterCopy() {
+  if (!canSelfInstall()) return;
+  const copy = path.join(process.env.LOCALAPPDATA || "", "Usage Monitor Updater", "install-win.ps1");
+  try { if (fs.existsSync(copy)) fs.writeFileSync(copy, bundledInstaller()); } catch (e) { console.error("no se pudo actualizar el instalador local:", e.message); }
+}
+function installUpdate() {
+  if (!canSelfInstall()) return;
+  try {
+    const file = path.join(app.getPath("userData"), "install-win.ps1");
+    fs.writeFileSync(file, bundledInstaller());
+    require("child_process").spawn("powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", file, "-Quiet", "-Channel", updateChannel(), "-InstallDir", installDir()],
+      { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    if (Notification.isSupported()) new Notification({ title: "Usage Monitor", body: "Instalando la actualización… la app se cerrará y volverá a abrirse." }).show();
+  } catch (e) {
+    dialog.showErrorBox("Usage Monitor", `No se pudo iniciar la actualización: ${e.message}`);
+  }
+}
+
+// Resumen de la actualización: al arrancar con otra versión que la última vez, se arma la lista de cambios (notas
+// de los releases y commits entre ambas) y se muestra en el panel hasta que la cierres.
+async function noteVersionChange() {
+  const ver = app.getVersion(), prev = settings.lastVersion;
+  if (prev === ver || MOCK) return;
+  saveFlag("lastVersion", ver);
+  if (!prev) return;      // primera vez: no hay «desde»
+  let summary = { from: prev, to: ver, downgrade: updates.compareVersions(ver, prev) < 0, items: [], more: 0, url: releases.page };
+  if (settings.updateCheck) {
+    try { summary = await updates.fetchSummary(releases, prev, ver, ver); } catch (e) { console.error("no se pudo armar el resumen:", e.message); }
+  }
+  saveFlag("updateSummary", { ...summary, at: Date.now() });
+  if (settings.alerts && Notification.isSupported()) {
+    const n = new Notification({ title: `Usage Monitor actualizado a v${summary.to}`, body: summary.items[0] ? `${summary.items[0]}${summary.items.length > 1 ? ` (y ${summary.items.length - 1 + summary.more} más)` : ""}` : "Abre el panel para ver las novedades." });
+    n.on("click", showPanel);
+    n.show();
+  }
+  refreshChrome(true); notifyPanel();
 }
 async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
@@ -290,10 +342,12 @@ function statusLines() {
 }
 const radio = (items, current, set) => items.map(([label, value]) => ({ label, type: "radio", checked: current === value, click: () => set(value) }));
 function updateSetting(key, value) {
+  if (key === "updateChannel" && !updates.CHANNELS.includes(value)) return;
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
   if (key === "updateCheck") { if (value) checkUpdates(); else refreshAdvice(); }
+  if (key === "updateChannel") { latest = null; refreshAdvice(); checkUpdates(); }   // lo del canal anterior ya no vale
   if (key === "source") {
     errors = 0; loginShown = false;
     if (value === "web" && !win) createSessionWindow();
@@ -306,7 +360,12 @@ function updateSetting(key, value) {
 function menuTemplate() {
   const lines = statusLines().map(label => ({ label, enabled: false }));
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
-  const advice = updateAdvice.map(a => ({ label: a.kind === "server" ? `Actualiza el servidor a v${a.version}…` : `Actualización disponible: v${a.version}…`, click: () => openRelease(a.url) }));
+  const install = a => a.kind === "app" && canSelfInstall();
+  const advice = updateAdvice.map(a => ({
+    label: a.kind === "server" ? `Actualiza el servidor a v${a.version}…` : install(a) ? `Instalar v${a.version} ahora` : `Actualización disponible: v${a.version}…`,
+    click: () => install(a) ? installUpdate() : openRelease(a.url)
+  }));
+  if (settings.updateSummary) advice.push({ label: `Novedades de v${settings.updateSummary.to}…`, click: showPanel });
   if (advice.length) lines.push({ type: "separator" }, ...advice);
   // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
   const more = [
@@ -314,6 +373,7 @@ function menuTemplate() {
     claudeCode.isConnected() ? { label: "Desconectar de Claude Code…", click: disconnectClaudeCode } : { label: "Conectar con Claude Code…", click: connectClaudeCode },
     ...(settings.source === "web" ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
+    { label: "Canal de actualizaciones", submenu: radio([["Estable (main)", "main"], ["Desarrollo (dev)", "dev"]], updateChannel(), v => updateSetting("updateChannel", v)) },
     { type: "separator" },
     { label: "Abrir al iniciar sesión", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: m => app.setLoginItemSettings({ openAtLogin: m.checked }) },
     ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : [])
@@ -372,12 +432,13 @@ function storageSnapshot() {
     remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
     serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
     updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
+    updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary,
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
   };
 }
-const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck" };
+const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel" };
 ipcMain.handle("storage-get", (_e, keys) => {
   const all = storageSnapshot();
   if (keys == null) return all;
@@ -395,6 +456,8 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   // Solo se copia un token generado en el panel (nada arbitrario al portapapeles).
   if (message && message.type === "COPY_TOKEN_LINE" && /^[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
   if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
+  if (message && message.type === "INSTALL_UPDATE") { installUpdate(); return { ok: true }; }
+  if (message && message.type === "DISMISS_UPDATE_SUMMARY") { saveFlag("updateSummary", null); refreshChrome(true); notifyPanel(); return { ok: true }; }
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -566,6 +629,7 @@ app.whenReady().then(async () => {
   if (!MOCK && settings.source === "web") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   setTimeout(checkUpdates, 10000); setInterval(checkUpdates, UPDATE_CHECK_MS);
+  noteVersionChange(); refreshUpdaterCopy();
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
   app.on("activate", () => { if (Date.now() - startedAt > 4000) showPanel(); });

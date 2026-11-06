@@ -43,6 +43,7 @@
     </section>
 
     <section id="weekly" class="weekly" hidden></section>
+    <section id="update-summary" class="connect updates" hidden></section>
     <section id="updates" class="connect updates" hidden></section>
     <section id="connect" class="connect" hidden>
       <h2>Conecta Usage Monitor con Claude Code</h2>
@@ -159,6 +160,13 @@
           <div class="row-text"><span class="row-title">Buscar actualizaciones</span><span class="row-desc">De la app y del servidor; consulta los releases en GitHub cada 6 h</span></div>
           <input type="checkbox" id="update-check" class="switch">
         </label>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Canal de actualizaciones</span><span class="row-desc">Estable: versiones de main. Desarrollo: también las de dev, para probar.</span></div>
+          <select id="update-channel">
+            <option value="main">Estable (main)</option>
+            <option value="dev">Desarrollo (dev)</option>
+          </select>
+        </div>
       </section>
 
       <section class="group" aria-labelledby="g-data">
