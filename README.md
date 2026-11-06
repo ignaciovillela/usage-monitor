@@ -60,7 +60,7 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
   ```
   Con el mismo comando, cambiando `-AutoUpdate` por `-DisableAutoUpdate` la quitas, y con `-Uninstall` borras la app, el acceso directo y la tarea (tus datos quedan en `%APPDATA%\Usage Monitor`).
 
-  **Canal (main o dev):** en una instalación nueva se instala la última estable (main); añade `-Channel dev` para la última de desarrollo. Después se cambia desde la app (*Ajustes y datos → Canal de actualizaciones*, o *Más opciones* en el menú de la bandeja), y el botón *Actualizar ahora* y la tarea automática siguen ese canal. Pasar de dev a main instala la estable aunque tenga un número menor.
+  **Canal (main o dev):** en una instalación nueva se instala la última estable (main); añade `-Channel dev` para la última de desarrollo. Después se cambia desde la app (*Ajustes → Avisos y actualizaciones → Canal*; el engranaje del panel o *Ajustes…* en el menú de la bandeja), y el botón *Actualizar ahora* y la tarea automática siguen ese canal. Pasar de dev a main instala la estable aunque tenga un número menor.
 - **Windows, con el zip descargado del navegador:** descomprime y ejecuta `Usage Monitor.exe`. Los releases van firmados con Azure Artifact Signing, así que Smart App Control no los bloquea (SmartScreen puede avisar mientras el certificado gana reputación: *Más información → Ejecutar de todos modos*). Si compilas tú la app, sale sin firmar y Smart App Control la bloqueará; ver [docs/windows-signing.md](docs/windows-signing.md). El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
 
 **Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
@@ -79,15 +79,15 @@ En macOS la app está firmada ad hoc, sin notarizar: la primera vez, clic derech
 
 Si usas Claude Code con un plan **Pro o Max**, la app lee tus límites de uso desde su [línea de estado](https://code.claude.com/docs/en/statusline), que recibe `rate_limits.five_hour` y `rate_limits.seven_day`. No se maneja ninguna sesión, cookie ni token: solo los números que Claude Code ya calcula.
 
-Al abrir la app por primera vez, el panel muestra la tarjeta **«Conecta Usage Monitor con Claude Code»**. Pulsa *Conectar con Claude Code* y confirma: la app instala `~/.usage-monitor/statusline-feed.sh` y añade la clave `statusLine` a `~/.claude/settings.json`, guardando antes una copia de respaldo con fecha. Si ya tenías una línea de estado, se conserva (el script la ejecuta después). *Desconectar de Claude Code…* (menú del Dock) lo deja como estaba.
+Al abrir la app por primera vez, el panel muestra la tarjeta **«Conecta Usage Monitor con Claude Code»**. Pulsa *Conectar con Claude Code* y confirma: la app instala `~/.usage-monitor/statusline-feed.sh` y añade la clave `statusLine` a `~/.claude/settings.json`, guardando antes una copia de respaldo con fecha. Si ya tenías una línea de estado, se conserva (el script la ejecuta después). *Ajustes → Fuente de datos → Desconectar…* lo deja como estaba.
 
-Después abre una sesión **nueva** de Claude Code: la app se actualiza sola cuando llegan los datos. Si prefieres la ventana de claude.ai, usa *Usar claude.ai en su lugar* en la tarjeta o *Fuente de datos* en el menú del Dock.
+Después abre una sesión **nueva** de Claude Code: la app se actualiza sola cuando llegan los datos. Si prefieres la ventana de claude.ai, usa *Usar claude.ai en su lugar* en la tarjeta o *Ajustes → Fuente de datos*.
 
 Limitaciones: Claude Code solo envía los límites tras la primera respuesta de cada sesión, no hay datos mientras no lo uses, y solo cuenta el uso que Claude Code refleja (no verifiqué si incluye el chat de claude.ai). Sin `jq` el script guarda la entrada completa de la línea de estado (ruta de trabajo, modelo, etc.) en un archivo local con permisos 600; con `jq` guarda solo `rate_limits`.
 
 ### Conectar tu cuenta (fuente claude.ai)
 
-Si eliges esta fuente, al abrir la app se muestra una ventana de **claude.ai**: inicia sesión ahí. La sesión se conserva entre ejecuciones y la ventana se oculta sola cuando hay datos. Se vuelve a mostrar si la sesión caduca, si claude.ai no carga o tras dos fallos seguidos; también desde el menú del Dock (*Ventana de claude.ai…*).
+Si eliges esta fuente, al abrir la app se muestra una ventana de **claude.ai**: inicia sesión ahí. La sesión se conserva entre ejecuciones y la ventana se oculta sola cuando hay datos. Se vuelve a mostrar si la sesión caduca, si claude.ai no carga o tras dos fallos seguidos; también desde el menú del Dock (*Ventana de claude.ai…*) o desde *Ajustes → Fuente de datos*.
 
 Si claude.ai muestra una verificación («comprobando que eres humano»), complétala en esa ventana. **La app no oculta que es una ventana embebida ni intenta saltarse ninguna protección.** Si el sitio no permite iniciar sesión en un navegador embebido (por ejemplo con ciertos proveedores de identidad o verificaciones), la app no podrá leer tu uso; esto no se ha validado con todas las cuentas y es la principal limitación conocida.
 

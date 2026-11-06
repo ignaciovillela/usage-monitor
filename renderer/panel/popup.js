@@ -478,7 +478,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -521,10 +521,18 @@ function showSource(source) {
   $("data-source").value = source;
   $("source-hint").textContent = SOURCE_HINTS[source] || "";
   $("remote-fields").hidden = source !== "remote";
+  $("cc-row").hidden = source !== "claude-code";
+  $("web-row").hidden = source !== "web";
 }
 function setStatus(text, state) { $("remote-status").textContent = text; $("remote-status").dataset.state = state || ""; }
 function renderSource(data) {
   const source = data.dataSource || "claude-code";
+  ui.ccConnected = !!data.claudeCodeConnected;
+  $("cc-desc").textContent = ui.ccConnected ? "Conectada: la app lee tus límites desde ahí" : "Sin conectar: no llegan datos";
+  $("cc-btn").textContent = ui.ccConnected ? "Desconectar…" : "Conectar…";
+  $("cc-btn").className = ui.ccConnected ? "text-btn" : "text-btn primary";
+  $("poll-seconds").value = String([10, 20, 30, 60].includes(data.pollSeconds) ? data.pollSeconds : 20);
+  $("open-at-login").checked = !!data.openAtLogin;
   showSource(source);
   for (const [id, key] of [["remote-url", "remoteUrl"], ["remote-url-online", "remoteUrlOnline"]]) {
     if (document.activeElement !== $(id)) $(id).value = data[key] || "";
@@ -765,7 +773,13 @@ $("import").addEventListener("click", () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && (changes[STATE_KEY] || changes[SAMPLES_KEY])) load();
   if (area === "local" && changes.updateProgress) { ui.updates = { ...(ui.updates || {}), progress: changes.updateProgress.newValue }; renderUpdates(); }
+  if (area === "local" && changes.panelView) showSettings(changes.panelView.newValue === "settings");    // «Ajustes…» del menú
 });
+$("cc-btn").addEventListener("click", () => chrome.runtime.sendMessage({ type: ui.ccConnected ? "DISCONNECT_CLAUDE_CODE" : "CONNECT_CLAUDE_CODE" }, () => { void chrome.runtime.lastError; load(); }));
+$("web-open").addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_LOGIN_WINDOW" }));
+$("poll-seconds").addEventListener("change", e => chrome.storage.local.set({ pollSeconds: Number(e.target.value) }));
+$("open-at-login").addEventListener("change", e => chrome.storage.local.set({ openAtLogin: e.target.checked }));
+if (location.hash === "#settings") showSettings(true);
 setInterval(() => { model.now = Date.now(); renderSummary(); }, 15000);
 
 load().then(() => {

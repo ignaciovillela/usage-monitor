@@ -97,6 +97,14 @@
             <option value="remote">Servidor propio</option>
           </select>
         </div>
+        <div id="cc-row" class="row" hidden>
+          <div class="row-text"><span class="row-title">Línea de estado de Claude Code</span><span id="cc-desc" class="row-desc"></span></div>
+          <button id="cc-btn" class="text-btn"></button>
+        </div>
+        <div id="web-row" class="row" hidden>
+          <div class="row-text"><span class="row-title">Sesión de claude.ai</span><span class="row-desc">La ventana donde inicias sesión; puede quedar cerrada</span></div>
+          <button id="web-open" class="text-btn">Abrir ventana</button>
+        </div>
         <div id="remote-fields" class="remote-fields" hidden>
           <label class="stack">
             <span class="row-title">URL local</span>
@@ -124,6 +132,23 @@
             <button id="remote-save" class="text-btn primary">Guardar y probar</button>
           </div>
         </div>
+      </section>
+
+      <section class="card group" aria-labelledby="g-general">
+        <h3 id="g-general">General</h3>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Consultar el uso</span><span class="row-desc">Más seguido es más preciso; más espaciado consume menos</span></div>
+          <select id="poll-seconds">
+            <option value="10">Cada 10 s</option>
+            <option value="20">Cada 20 s</option>
+            <option value="30">Cada 30 s</option>
+            <option value="60">Cada 60 s</option>
+          </select>
+        </div>
+        <label class="row switch-row">
+          <span class="row-text"><span class="row-title">Abrir al iniciar sesión</span><span class="row-desc">La app arranca sola al encender el equipo</span></span>
+          <input type="checkbox" id="open-at-login" class="switch">
+        </label>
       </section>
 
       <section class="card group" aria-labelledby="g-icon">

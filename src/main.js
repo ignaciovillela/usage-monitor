@@ -422,7 +422,6 @@ function statusLines() {
   else lines.push(s.error || "Conectando con claude.ai…");
   return lines;
 }
-const radio = (items, current, set) => items.map(([label, value]) => ({ label, type: "radio", checked: current === value, click: () => set(value) }));
 function updateSetting(key, value) {
   if (key === "updateChannel" && !updates.CHANNELS.includes(value)) return;
   settings = { ...settings, [key]: value };
@@ -433,7 +432,7 @@ function updateSetting(key, value) {
   if (key === "source") {
     errors = 0; loginShown = false;
     if (value === "web" && !win) createSessionWindow();
-    if (value === "remote" && !remoteUrl()) showPanel();      // el panel tiene los campos de URL y token
+    if (value === "remote" && !remoteUrl()) showPanel("settings");      // los campos de URL y token están en Ajustes
     if (value !== "remote") refreshAdvice();                   // sin servidor propio no hay aviso sobre su versión
     tick();
   }
@@ -450,22 +449,14 @@ function menuTemplate() {
   }));
   if (settings.updateSummary) advice.push({ label: `Novedades de v${settings.updateSummary.to}…`, click: showPanel });
   if (advice.length) lines.push({ type: "separator" }, ...advice);
-  // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
-  const more = [
-    { label: "Fuente de datos", submenu: radio([["Claude Code (línea de estado)", "claude-code"], ["claude.ai (ventana propia)", "web"], ["Servidor propio (URL)…", "remote"]], settings.source, v => updateSetting("source", v)) },
-    claudeCode.isConnected() ? { label: "Desconectar de Claude Code…", click: disconnectClaudeCode } : { label: "Conectar con Claude Code…", click: connectClaudeCode },
-    ...(settings.source === "web" ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
-    { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
-    { label: "Canal de actualizaciones", submenu: radio([["Estable (main)", "main"], ["Desarrollo (dev)", "dev"]], updateChannel(), v => updateSetting("updateChannel", v)) },
-    { type: "separator" },
-    { label: "Abrir al iniciar sesión", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: m => app.setLoginItemSettings({ openAtLogin: m.checked }) },
-    ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : [])
-  ];
+  // Todos los ajustes viven en el panel (vista «Ajustes»); el menú solo tiene lo de uso diario.
   return [
     ...lines, { type: "separator" },
-    { label: "Abrir panel", click: showPanel },
+    { label: "Abrir panel", click: () => showPanel() },
     { label: "Actualizar ahora", click: () => tick({ manual: true }) },
-    { label: "Más opciones", submenu: more },
+    ...(settings.source === "web" ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
+    { label: "Ajustes…", click: () => showPanel("settings") },
+    ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : []),
     ...(tray ? [{ type: "separator" }, { label: "Salir", click: () => app.quit() }] : [])   // en macOS el Dock ya trae «Salir»
   ];
 }
@@ -487,7 +478,10 @@ function panelBounds() {
   return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 900);
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
-function showPanel() {
+// view = "settings" abre directamente la vista de ajustes.
+function showPanel(view) {
+  if (typeof view !== "string") view = null;      // como manejador de clic recibe el ítem del menú o el evento
+  if (panelWin && !panelWin.isDestroyed() && view) panelWin.webContents.send("storage-changed", { panelView: { newValue: view } });
   if (!panelWin || panelWin.isDestroyed()) {
     panelWin = new BrowserWindow({
       ...panelBounds(), useContentSize: true, minWidth: 340, minHeight: 420, title: "Usage Monitor", backgroundColor: "#0d0d0d",
@@ -496,7 +490,7 @@ function showPanel() {
     setupTaskbar(panelWin);
     panelWin.on("closed", () => { panelWin = null; });
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
-    panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"));
+    panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"), view ? { hash: view } : {});
   }
   panelWin.show(); panelWin.focus();
 }
@@ -518,22 +512,31 @@ function storageSnapshot() {
     updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary, updateProgress: publicJob(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
+    pollSeconds: settings.pollSeconds, openAtLogin: app.getLoginItemSettings().openAtLogin,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
   };
 }
-const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel" };
+const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel", pollSeconds: "pollSeconds" };
 ipcMain.handle("storage-get", (_e, keys) => {
   const all = storageSnapshot();
   if (keys == null) return all;
   const list = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : Object.keys(keys);
   return Object.fromEntries(list.filter(k => k in all).map(k => [k, all[k]]));
 });
-ipcMain.handle("storage-set", (_e, obj) => { for (const [k, v] of Object.entries(obj || {})) if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v); });
+ipcMain.handle("storage-set", (_e, obj) => {
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (k === "pollSeconds" && ![10, 20, 30, 60].includes(v)) continue;
+    if (k === "openAtLogin") { app.setLoginItemSettings({ openAtLogin: !!v }); refreshChrome(true); continue; }
+    if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v);
+  }
+});
 ipcMain.handle("storage-remove", () => undefined);
 ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "IMPORT_CSV") return importCsv();
   if (message && message.type === "POLL_NOW") await tick({ manual: true });
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
+  if (message && message.type === "DISCONNECT_CLAUDE_CODE") { await disconnectClaudeCode(); return { ok: true }; }
+  if (message && message.type === "OPEN_LOGIN_WINDOW") { if (!win) createSessionWindow(); showLogin(); return { ok: true }; }
   if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);
   // Solo se copia un token generado en el panel (nada arbitrario al portapapeles).
@@ -679,7 +682,7 @@ async function firstRunSetup() {
   if (!app.isInApplicationsFolder() && !settings.moveDeclined) {
     if (await offerMove(false)) return;                // se movió: la copia nueva repite esta rutina ya en Aplicaciones
   }
-  // Inicio automático: se activa la primera vez; después se respeta lo que elijas en el menú del Dock.
+  // Inicio automático: se activa la primera vez; después se respeta lo que elijas en Ajustes.
   if (!settings.loginConfigured) { app.setLoginItemSettings({ openAtLogin: true }); saveFlag("loginConfigured", true); }
 }
 

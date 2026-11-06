@@ -41,7 +41,7 @@ Personas que usan Claude Code de forma intensiva en macOS y quieren administrar 
 - Anillo exterior = uso de la ventana (color del veredicto); anillo interior = tiempo transcurrido. Formas: dos anillos, donut, torta 1/2/3.
 - Número opcional dentro: veredicto (solo si hay riesgo), probabilidad de agotar, porcentaje, tiempo hasta el límite o hasta el reinicio. Tamaño, posición y transparencia configurables.
 - Se redibuja cada 5 s y solo si algo visible cambió.
-- Menú del Dock: estado, ajustes, abrir al iniciar sesión, mover a Aplicaciones, ventana de claude.ai.
+- Menú del Dock: estado, abrir el panel, actualizar, *Ajustes…* (abre el panel en la vista de ajustes), mover a Aplicaciones y ventana de claude.ai. Los ajustes (fuente, frecuencia, abrir al iniciar sesión, ícono, avisos, canal) están todos en el panel.
 - Primera ejecución: ofrece moverse a `/Applications` y activa el inicio automático una vez.
 
 ### 5.3 Panel (clic en el ícono)
