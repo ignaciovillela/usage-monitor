@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # login de Azure por OIDC para firmar en Windows
 
 concurrency:
   group: release-${{ github.ref }}-${{ github.event_name }}
@@ -66,6 +67,8 @@ jobs:
           - { name: macos-arm64, os: macos-latest, script: "build:mac" }
           - { name: windows-x64, os: windows-latest, script: "build:win" }
     runs-on: ${{ matrix.os }}
+    # El entorno «signing» es lo que autoriza la credencial federada de Azure (OIDC); solo lo usa el build de Windows fuera de los PR.
+    environment: ${{ (matrix.os == 'windows-latest' && github.event_name != 'pull_request') && 'signing' || '' }}
     env:
       TAG: ${{ needs.meta.outputs.tag }}
     steps:
@@ -79,6 +82,50 @@ jobs:
         shell: bash
         run: npm version "${{ needs.meta.outputs.version }}" --no-git-tag-version
       - run: npm run ${{ matrix.script }}
+
+      # Firma de Windows con Azure Artifact Signing (antes Trusted Signing): sin firma, Smart App Control bloquea la app.
+      # Se firman todos los binarios del paquete (exe, dll y módulos nativos), porque Windows revisa cada uno al cargarlo.
+      # No se firma en los PR. Si faltan las variables de Azure, el build sigue sin firmar y deja un aviso.
+      - name: Comprobar configuración de firma (Windows)
+        id: signing
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if [ -n "${{ vars.AZURE_CLIENT_ID }}" ] && [ -n "${{ vars.AZURE_SIGNING_ENDPOINT }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Firma de Windows desactivada: faltan las variables AZURE_* del repositorio. El .zip saldrá sin firmar y Smart App Control lo bloqueará."
+          fi
+      - name: Azure login (OIDC)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Firmar binarios (Windows)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\Usage Monitor-win32-x64
+          files-folder-filter: exe,dll,node
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Usage Monitor
+          description-url: https://github.com/${{ github.repository }}
+      - name: Verificar firmas (Windows)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $bad = Get-ChildItem "dist/Usage Monitor-win32-x64" -Recurse -Include *.exe,*.dll,*.node |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
+          if ($bad) { $bad.FullName | ForEach-Object { "Sin firma válida: $_" }; exit 1 }
+          "Todos los binarios están firmados."
 
       - name: Instalador .dmg (macOS)
         if: runner.os == 'macOS'
