@@ -465,7 +465,10 @@ function renderChart() {
   legend.hidden = !legend.childElementCount;
   $("caption").textContent = spec.caption;
   for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === ui.tab));
-  for (const b of document.querySelectorAll("[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === ui.view));
+  const toggle = $("view-toggle");
+  toggle.hidden = !spec.head;      // sin datos no hay tabla que mostrar
+  toggle.setAttribute("aria-pressed", String(ui.view === "table"));
+  toggle.textContent = ui.view === "table" ? "Ver gráfico" : "Ver tabla";
 }
 
 // ── Datos y ajustes ─────────────────────────────────────────────────────────
@@ -500,10 +503,10 @@ async function load() {
   renderIconPreview();
 }
 function pollNow() {
-  $("chart").classList.add("loading");
+  $("chart").classList.add("loading"); $("refresh").classList.add("spinning");
   chrome.runtime.sendMessage({ type: "POLL_NOW" }, () => {
     void chrome.runtime.lastError;
-    $("chart").classList.remove("loading");
+    $("chart").classList.remove("loading"); $("refresh").classList.remove("spinning");
     load();
   });
 }
@@ -586,13 +589,14 @@ function renderVersions(data) {
   $("repo-link").hidden = !data.repoUrl;
   $("repo-link").dataset.url = data.repoUrl || "";
   $("update-check").checked = data.updateCheck !== false;
+  $("channel-row").hidden = data.updateCheck === false;      // el canal solo importa si se buscan actualizaciones
   $("update-channel").value = data.updateChannel === "dev" ? "dev" : "main";
   renderUpdateSummary(data.updateSummary);
   ui.updates = { advice: Array.isArray(data.updateAdvice) ? data.updateAdvice : [], canInstall: !!data.canInstallUpdate, progress: data.updateProgress || null };
   renderUpdates();
 }
 const MB = n => `${(n / 1048576).toFixed(0)} MB`;
-const button = (text, primary, onClick) => { const b = html("button"); b.className = primary ? "text-btn primary" : "text-btn"; b.textContent = text; b.addEventListener("click", onClick); return b; };
+const button = (text, primary, onClick) => { const b = html("button"); b.className = primary ? "text-btn primary" : "link-btn"; b.textContent = text; b.addEventListener("click", onClick); return b; };
 // Tarjeta de actualización: el aviso con «Actualizar ahora» o, si ya empezó, la barra de descarga, la instalación o el error.
 // Se vuelve a dibujar con cada avance de la descarga (la app manda «updateProgress» sin recargar el resto del panel).
 function renderUpdates() {
@@ -601,7 +605,7 @@ function renderUpdates() {
   box.hidden = !advice.length && !job;
   box.replaceChildren();
   if (box.hidden) return;
-  const row = html("div"); row.className = "connect-actions";
+  const row = html("div"); row.className = "notice-actions";
   const h = html("h2");
   if (job && job.phase === "download") {
     const pct = job.total ? Math.min(100, Math.round(job.received / job.total * 100)) : null;
@@ -662,24 +666,31 @@ function renderUpdateSummary(s) {
     if (s.more) { const li = html("li"); li.className = "muted"; li.textContent = `y ${s.more} más`; ul.append(li); }
     box.append(ul);
   }
-  const row = html("div"); row.className = "connect-actions";
-  if (s.url) {
-    const b = html("button"); b.className = "text-btn"; b.textContent = "Ver en GitHub";
-    b.addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: s.url }));
-    row.append(b);
-  }
-  const ok = html("button"); ok.className = "text-btn primary"; ok.textContent = "Entendido";
-  ok.addEventListener("click", () => chrome.runtime.sendMessage({ type: "DISMISS_UPDATE_SUMMARY" }));
-  row.append(ok);
+  const row = html("div"); row.className = "notice-actions";
+  row.append(button("Entendido", true, () => chrome.runtime.sendMessage({ type: "DISMISS_UPDATE_SUMMARY" })));
+  if (s.url) row.append(button("Ver en GitHub", false, () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: s.url })));
   box.append(row);
 }
 $("update-channel").addEventListener("change", e => chrome.storage.local.set({ updateChannel: e.target.value }));
 $("repo-link").addEventListener("click", e => { e.preventDefault(); chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url: e.currentTarget.dataset.url }); });
-$("update-check").addEventListener("change", e => chrome.storage.local.set({ updateCheck: e.target.checked }));
+$("update-check").addEventListener("change", e => { $("channel-row").hidden = !e.target.checked; chrome.storage.local.set({ updateCheck: e.target.checked }); });
+
+// Dos vistas: «Uso» (lo que se mira a diario) y «Ajustes» (lo que se toca de vez en cuando), con el engranaje de la cabecera.
+function showSettings(open) {
+  $("view-usage").hidden = open;
+  $("view-settings").hidden = !open;
+  $("settings-btn").setAttribute("aria-pressed", String(open));
+  $("settings-btn").title = open ? "Volver al uso" : "Ajustes";
+  window.scrollTo(0, 0);
+  if (open) renderIconPreview(); else { hideTip(); renderChart(); }
+}
+$("settings-btn").addEventListener("click", () => showSettings($("view-settings").hidden));
+$("settings-back").addEventListener("click", () => showSettings(false));
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("view-settings").hidden) showSettings(false); });
 
 $("refresh").addEventListener("click", pollNow);
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => { ui.tab = b.dataset.tab; renderChart(); });
-for (const b of document.querySelectorAll("[data-view]")) b.addEventListener("click", () => { ui.view = b.dataset.view; renderChart(); });
+$("view-toggle").addEventListener("click", () => { ui.view = ui.view === "table" ? "chart" : "table"; renderChart(); });
 $("alerts").addEventListener("change", e => chrome.storage.local.set({ [ALERTS_KEY]: e.target.checked }));
 // Vista previa del ícono con los valores actuales de las barras (sin esperar a guardar).
 function updateNumberLabels() {
@@ -716,15 +727,24 @@ $("number-alpha").addEventListener("input", e => { $("alpha-value").textContent 
 $("number-alpha").addEventListener("change", e => chrome.storage.local.set({ [NUMBER_ALPHA_KEY]: Number(e.target.value) / 100 }));
 $("badge-mode").addEventListener("change", e => chrome.storage.local.set({ [BADGE_KEY]: e.target.value }));
 
-$("export").addEventListener("click", () => {
-  const lines = ["timestamp,uso_pct,reinicio"].concat(model.samples.map(s =>
-    `${new Date(s.ts).toISOString()},${s.value},${s.resetsAt ? new Date(s.resetsAt).toISOString() : ""}`));
+function saveCsv(lines, name) {
   const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
   const a = html("a");
   a.href = url;
-  a.download = `usage-monitor-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("export").addEventListener("click", () => saveCsv(["timestamp,uso_pct,reinicio"].concat(model.samples.map(s =>
+  `${new Date(s.ts).toISOString()},${s.value},${s.resetsAt ? new Date(s.resetsAt).toISOString() : ""}`)), "usage-monitor"));
+// Historial semanal [cupo, reinicio, pico, [[ts, uso], …]] en el formato que lee «Importar CSV» (src/importer.js).
+$("export-weekly").addEventListener("click", () => {
+  const lines = ["cupo,reinicio,timestamp,uso_pct"];
+  for (const [key, resetsAt, , points] of model.weeklyLog) {
+    for (const [ts, v] of points || []) lines.push(`${key},${new Date(resetsAt).toISOString()},${new Date(ts).toISOString()},${v}`);
+  }
+  if (lines.length === 1) { $("import-status").textContent = "Aún no hay historial semanal para exportar."; return; }
+  saveCsv(lines, "usage-monitor-semanal");
 });
 $("connect-btn").addEventListener("click", () => chrome.runtime.sendMessage({ type: "CONNECT_CLAUDE_CODE" }, () => { void chrome.runtime.lastError; load(); }));
 $("use-web").addEventListener("click", () => chrome.runtime.sendMessage({ type: "SET_SOURCE", value: "web" }, () => { void chrome.runtime.lastError; load(); }));

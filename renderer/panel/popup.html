@@ -9,73 +9,85 @@
 <body>
   <main>
     <header>
-      <div>
+      <div class="title">
         <h1>Usage Monitor</h1>
         <p id="status" class="muted">Consultando…</p>
       </div>
-      <button id="refresh" class="icon-btn" title="Actualizar ahora" aria-label="Actualizar ahora">↻</button>
+      <div class="header-actions">
+        <button id="refresh" class="icon-btn" title="Actualizar ahora" aria-label="Actualizar ahora">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+        </button>
+        <button id="settings-btn" class="icon-btn" title="Ajustes" aria-label="Ajustes" aria-pressed="false" aria-controls="view-settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
     </header>
 
-    <section class="hero" aria-live="polite">
-      <div class="hero-row">
-        <div id="percent" class="percent">—%</div>
-        <div class="hero-text">
-          <div id="headline" class="headline"><span id="v-icon" class="v-icon" aria-hidden="true"></span><span id="v-text">Consultando…</span></div>
-          <div id="detail" class="muted"></div>
-          <div id="why" class="why muted"></div>
+    <!-- Avisos: lo que pide una acción (error, conectar, actualizar). Todos con el mismo formato y arriba de todo. -->
+    <div class="notices">
+      <section id="error" class="notice notice-error" role="alert" hidden></section>
+      <section id="connect" class="notice" hidden>
+        <h2>Conecta Usage Monitor con Claude Code</h2>
+        <p>Lee tu uso desde Claude Code, donde ya tienes tu sesión: sin iniciar sesión en otra ventana ni compartir cookies. Planes Pro y Max.</p>
+        <div class="notice-actions">
+          <button id="connect-btn" class="text-btn primary">Conectar</button>
+          <button id="use-web" class="link-btn">Usar claude.ai en su lugar</button>
         </div>
-      </div>
-      <div id="meter" class="meter" role="img" aria-label="Uso frente al tiempo transcurrido">
-        <div id="meter-fill" class="meter-fill"></div>
-        <div id="meter-time" class="meter-time"></div>
-      </div>
-      <div class="meter-legend muted">
-        <span><i class="key key-fill"></i>Uso</span>
-        <span><i class="key key-time"></i>Tiempo transcurrido: <b id="elapsed">—</b></span>
-      </div>
-    </section>
+      </section>
+      <section id="updates" class="notice" hidden></section>
+      <section id="update-summary" class="notice" hidden></section>
+    </div>
 
-    <section class="tiles">
-      <div class="tile"><span>Reinicio</span><strong id="reset">—</strong><em id="reset-in" class="muted"></em></div>
-      <div class="tile"><span>Límite</span><strong id="limit">—</strong><em id="limit-in" class="muted"></em></div>
-      <div class="tile"><span>Ritmo</span><strong id="rate">—</strong><em id="confidence" class="muted"></em></div>
-      <div class="tile"><span>Al reinicio</span><strong id="at-reset">—</strong><em id="at-reset-sub" class="muted">proyección</em></div>
-    </section>
-
-    <section id="weekly" class="weekly" hidden></section>
-    <section id="update-summary" class="connect updates" hidden></section>
-    <section id="updates" class="connect updates" hidden></section>
-    <section id="connect" class="connect" hidden>
-      <h2>Conecta Usage Monitor con Claude Code</h2>
-      <p>Lee tu uso desde Claude Code, donde ya tienes tu sesión: no necesitas iniciar sesión en ninguna ventana ni compartir cookies. Solo funciona con planes Pro y Max.</p>
-      <div class="connect-actions">
-        <button id="connect-btn" class="text-btn primary">Conectar con Claude Code</button>
-        <button id="use-web" class="text-btn">Usar claude.ai en su lugar</button>
-      </div>
-    </section>
-    <section id="error" class="error" hidden></section>
-
-    <section class="charts">
-      <div class="chart-bar">
-        <div class="tabs" role="tablist" aria-label="Gráfico">
-          <button role="tab" data-tab="window" aria-selected="true">Ventana</button>
-          <button role="tab" data-tab="hours" aria-selected="false">24 horas</button>
-          <button role="tab" data-tab="windows" aria-selected="false">Ventanas</button>
+    <div id="view-usage" class="view">
+      <section class="card hero" aria-live="polite">
+        <div class="hero-row">
+          <div id="percent" class="percent">—%</div>
+          <div class="hero-text">
+            <div id="headline" class="headline"><span id="v-icon" class="v-icon" aria-hidden="true"></span><span id="v-text">Consultando…</span></div>
+            <div id="detail" class="muted"></div>
+            <div id="why" class="why muted"></div>
+          </div>
         </div>
-        <div class="tabs views" role="group" aria-label="Vista">
-          <button data-view="chart" aria-pressed="true">Gráfico</button>
-          <button data-view="table" aria-pressed="false">Tabla</button>
+        <div id="meter" class="meter" role="img" aria-label="Uso frente al tiempo transcurrido">
+          <div id="meter-fill" class="meter-fill"></div>
+          <div id="meter-time" class="meter-time"></div>
         </div>
+        <div class="meter-legend muted">
+          <span><i class="key key-fill"></i>Uso</span>
+          <span><i class="key key-time"></i>Tiempo transcurrido: <b id="elapsed">—</b></span>
+        </div>
+        <dl class="tiles">
+          <div class="tile"><dt>Reinicio</dt><dd><strong id="reset">—</strong><em id="reset-in" class="muted"></em></dd></div>
+          <div class="tile"><dt>Límite</dt><dd><strong id="limit">—</strong><em id="limit-in" class="muted"></em></dd></div>
+          <div class="tile"><dt>Ritmo</dt><dd><strong id="rate">—</strong><em id="confidence" class="muted"></em></dd></div>
+          <div class="tile"><dt>Al reinicio</dt><dd><strong id="at-reset">—</strong><em id="at-reset-sub" class="muted">proyección</em></dd></div>
+        </dl>
+      </section>
+
+      <section id="weekly" class="card weekly" hidden></section>
+
+      <section class="card charts">
+        <div class="chart-bar">
+          <div class="segmented" role="tablist" aria-label="Gráfico">
+            <button role="tab" data-tab="window" aria-selected="true">Ventana</button>
+            <button role="tab" data-tab="hours" aria-selected="false">24 horas</button>
+            <button role="tab" data-tab="windows" aria-selected="false">Ventanas</button>
+          </div>
+          <button id="view-toggle" class="link-btn" aria-pressed="false">Ver tabla</button>
+        </div>
+        <div id="chart" class="chart"></div>
+        <div id="legend" class="legend muted"></div>
+        <p id="caption" class="muted caption"></p>
+      </section>
+    </div>
+
+    <div id="view-settings" class="view" hidden>
+      <div class="view-head">
+        <button id="settings-back" class="link-btn back">‹ Volver</button>
+        <h2>Ajustes</h2>
       </div>
-      <div id="chart" class="chart"></div>
-      <div id="legend" class="legend muted"></div>
-      <p id="caption" class="muted caption"></p>
-    </section>
 
-    <details class="settings">
-      <summary>Ajustes y datos</summary>
-
-      <section class="group" aria-labelledby="g-source">
+      <section class="card group" aria-labelledby="g-source">
         <h3 id="g-source">Fuente de datos</h3>
         <div class="row">
           <div class="row-text"><span class="row-title">Leer el uso desde</span><span id="source-hint" class="row-desc"></span></div>
@@ -93,28 +105,28 @@
           <label class="stack">
             <span class="row-title">URL online <em class="opt">opcional</em></span>
             <input id="remote-url-online" type="url" placeholder="https://mi-servidor.ejemplo/usage" autocomplete="off" spellcheck="false">
-            <span class="row-desc">Se usa la local y, si no responde (fuera de casa), la online. Basta con una de las dos.</span>
+            <span class="row-desc">Se usa la local y, si no responde (fuera de casa), la online. Basta con una.</span>
           </label>
           <div class="stack">
-            <label class="row-title" for="remote-token">Token</label>
+            <label class="row-title" for="remote-token">Token <em class="opt">opcional</em></label>
             <div class="input-row">
               <input id="remote-token" type="password" placeholder="opcional" autocomplete="off" title="Déjalo vacío para mantener el token guardado">
               <button id="remote-gen-token" class="text-btn">Generar</button>
-              <button id="remote-clear-token" class="text-btn" hidden>Quitar</button>
             </div>
+            <button id="remote-clear-token" class="link-btn small" hidden>Quitar el token guardado</button>
           </div>
           <div id="token-env" class="token-env" hidden>
             <span class="row-desc">Pégalo en <code>API_TOKEN</code> del <code>docker-compose.yml</code> del servidor, reinícialo (<code>docker compose up -d</code>) y pulsa «Guardar y probar».</span>
             <div class="token-line"><code id="token-env-line"></code><button id="token-copy" class="text-btn">Copiar</button></div>
           </div>
-          <div class="actions">
-            <button id="remote-save" class="text-btn primary">Guardar y probar</button>
+          <div class="form-foot">
             <p id="remote-status" class="status" role="status"></p>
+            <button id="remote-save" class="text-btn primary">Guardar y probar</button>
           </div>
         </div>
       </section>
 
-      <section class="group" aria-labelledby="g-icon">
+      <section class="card group" aria-labelledby="g-icon">
         <h3 id="g-icon">Ícono</h3>
         <div class="icon-preview" aria-hidden="true">
           <div class="pv light"><canvas id="pv-light" width="128" height="128"></canvas><canvas id="pv-light-s" width="32" height="32"></canvas></div>
@@ -146,22 +158,22 @@
           <label class="slider"><span>Tamaño</span><input type="range" id="number-scale" min="50" max="160" step="5"><b id="scale-value"></b></label>
           <label class="slider"><span>Horizontal</span><input type="range" id="number-dx" min="-30" max="30" step="1"><b id="dx-value"></b></label>
           <label class="slider"><span>Vertical</span><input type="range" id="number-dy" min="-30" max="30" step="1"><b id="dy-value"></b></label>
-          <div class="actions"><button id="number-reset" class="text-btn">Restablecer</button></div>
+          <button id="number-reset" class="link-btn small">Restablecer tamaño y posición</button>
         </details>
       </section>
 
-      <section class="group" aria-labelledby="g-alerts">
-        <h3 id="g-alerts">Avisos</h3>
+      <section class="card group" aria-labelledby="g-alerts">
+        <h3 id="g-alerts">Avisos y actualizaciones</h3>
         <label class="row switch-row">
-          <div class="row-text"><span class="row-title">Alertas de uso</span><span class="row-desc">Al 80 %, al 90 % y si el límite llega antes del reinicio</span></div>
+          <span class="row-text"><span class="row-title">Alertas de uso</span><span class="row-desc">Al 80 %, al 90 % y si el límite llega antes del reinicio</span></span>
           <input type="checkbox" id="alerts" class="switch">
         </label>
         <label class="row switch-row">
-          <div class="row-text"><span class="row-title">Buscar actualizaciones</span><span class="row-desc">De la app y del servidor; consulta los releases en GitHub cada 6 h</span></div>
+          <span class="row-text"><span class="row-title">Buscar actualizaciones</span><span class="row-desc">De la app y del servidor, cada 6 h en GitHub</span></span>
           <input type="checkbox" id="update-check" class="switch">
         </label>
-        <div class="row">
-          <div class="row-text"><span class="row-title">Canal de actualizaciones</span><span class="row-desc">Estable: versiones de main. Desarrollo: también las de dev, para probar.</span></div>
+        <div id="channel-row" class="row">
+          <div class="row-text"><span class="row-title">Canal</span><span class="row-desc">Desarrollo también trae las versiones de prueba</span></div>
           <select id="update-channel">
             <option value="main">Estable (main)</option>
             <option value="dev">Desarrollo (dev)</option>
@@ -169,17 +181,23 @@
         </div>
       </section>
 
-      <section class="group" aria-labelledby="g-data">
-        <h3 id="g-data">Datos</h3>
-        <p id="precision" class="row-desc"></p>
-        <div class="actions">
-          <button id="export" class="text-btn">Exportar CSV</button>
-          <button id="export-weekly" class="text-btn">Exportar semanal</button>
-          <button id="import" class="text-btn">Importar CSV</button>
+      <section class="card group" aria-labelledby="g-data">
+        <h3 id="g-data">Historial</h3>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Exportar CSV</span><span class="row-desc">Las lecturas de la ventana de 5 h o los topes semanales</span></div>
+          <div class="btn-pair">
+            <button id="export" class="text-btn">Lecturas</button>
+            <button id="export-weekly" class="text-btn">Semanal</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-text"><span class="row-title">Importar CSV</span><span class="row-desc">Se suma a lo que ya hay; no borra nada</span></div>
+          <button id="import" class="text-btn">Importar…</button>
         </div>
         <p id="import-status" class="row-desc" role="status"></p>
+        <p id="precision" class="row-desc precision"></p>
       </section>
-    </details>
+    </div>
 
     <footer title="Los tiempos son estimaciones, no garantías."><span id="app-version"></span><a id="repo-link" href="#" hidden>GitHub</a></footer>
   </main>

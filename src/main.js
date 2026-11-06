@@ -651,7 +651,7 @@ async function panelShot(file) {
   persisted = p;
   showPanel();
   await new Promise(r => setTimeout(r, 3500));
-  if (process.env.USAGE_MONITOR_OPEN) { await panelWin.webContents.executeJavaScript(`document.querySelector("details").open = true; window.scrollTo(0, 9999)`); await new Promise(r => setTimeout(r, 600)); }
+  if (process.env.USAGE_MONITOR_OPEN) { await panelWin.webContents.executeJavaScript(`document.getElementById("settings-btn").click()`); await new Promise(r => setTimeout(r, 600)); }
   fs.writeFileSync(file, (await panelWin.webContents.capturePage()).toPNG());
   app.exit(0);
 }
