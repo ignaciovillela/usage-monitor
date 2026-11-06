@@ -15,7 +15,17 @@ English summary: a macOS (Dock) and Windows (system tray) app that projects your
 curl -fsSL https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-mac.sh | bash
 ```
 
-Instala la última versión en *Aplicaciones* sin avisos de macOS. Al abrirla, el panel te ofrece conectarla con Claude Code. Más opciones (Windows, `.dmg`, código fuente) en [Instalar](#instalar).
+Instala la última versión en *Aplicaciones* sin avisos de macOS. Al abrirla, el panel te ofrece conectarla con Claude Code.
+
+## Instalación rápida (Windows x64)
+
+En PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-win.ps1 | iex
+```
+
+Instala la última versión sin avisos de SmartScreen y la abre. Para que además se actualice sola, ver [Instalar](#instalar). Más opciones (`.dmg`, zip, código fuente) también ahí.
 
 ¿Prefieres que un servidor tuyo consulte el uso y la app solo lo muestre? Copia [`server/docker-compose.yml`](server/docker-compose.yml) (Docker, opcional) y mira [Servidor propio](#fuente-de-datos-servidor-propio-opcional).
 
@@ -38,7 +48,18 @@ Backtest con usuarios sintéticos (56 días) contra una extrapolación lineal: B
   ```
   Descarga el último `.dmg` con `curl`, copia la app a *Aplicaciones* y la abre. macOS solo bloquea lo que descargan los navegadores (los marca como «descargado de internet»), no lo que baja `curl`, así que no aparece ningún aviso; el script no toca ningún atributo de seguridad ni usa `sudo` (léelo antes: [scripts/install-mac.sh](scripts/install-mac.sh)).
 - **macOS, con el `.dmg` descargado del navegador:** arrastra *Usage Monitor* a *Applications*. La app no está firmada con un certificado de pago de Apple ni notarizada, así que macOS la bloqueará la primera vez. Para permitirla: *Ajustes del Sistema → Privacidad y seguridad → «Abrir de todos modos»* (aparece tras intentar abrirla una vez), o en Terminal `xattr -dr com.apple.quarantine "/Applications/Usage Monitor.app"`. (En macOS anteriores basta con clic derecho → *Abrir*.)
-- **Windows (x64) — experimental, sin probar en un equipo real:** descomprime y ejecuta `Usage Monitor.exe`. Los releases van firmados con Azure Artifact Signing, así que Smart App Control no los bloquea (SmartScreen puede avisar mientras el certificado gana reputación: *Más información → Ejecutar de todos modos*). Si compilas tú la app, sale sin firmar y Smart App Control la bloqueará; ver [docs/windows-signing.md](docs/windows-signing.md). El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
+- **Windows (x64) — experimental — instalación sin avisos, una línea en PowerShell:**
+  ```powershell
+  irm https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-win.ps1 | iex
+  ```
+  Descarga el último zip de Windows, lo instala en `%LOCALAPPDATA%\Programs\Usage Monitor`, crea un acceso directo en el menú Inicio y abre la app. Si vuelves a ejecutarlo, actualiza (o no hace nada si ya tienes la última versión). Lo que baja PowerShell no lleva la marca «descargado de internet», así que SmartScreen no avisa; no usa permisos de administrador ni toca tus datos (léelo antes: [scripts/install-win.ps1](scripts/install-win.ps1)).
+
+  **Actualización automática (opcional):** crea una tarea programada que repite la instalación al iniciar sesión y cada día; si hay versión nueva, cierra la app, la reemplaza y la vuelve a abrir.
+  ```powershell
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ignaciovillela/usage-monitor/main/scripts/install-win.ps1))) -AutoUpdate
+  ```
+  Con el mismo comando, cambiando `-AutoUpdate` por `-DisableAutoUpdate` la quitas, y con `-Uninstall` borras la app, el acceso directo y la tarea (tus datos quedan en `%APPDATA%\Usage Monitor`).
+- **Windows, con el zip descargado del navegador:** descomprime y ejecuta `Usage Monitor.exe`. Los releases van firmados con Azure Artifact Signing, así que Smart App Control no los bloquea (SmartScreen puede avisar mientras el certificado gana reputación: *Más información → Ejecutar de todos modos*). Si compilas tú la app, sale sin firmar y Smart App Control la bloqueará; ver [docs/windows-signing.md](docs/windows-signing.md). El ícono dinámico vive en la bandeja del sistema (junto al reloj; puede quedar en el menú «^» de íconos ocultos): clic para abrir el panel, clic derecho para el menú.
 
 **Desde el código fuente** (necesitas Node 20+; en Mac Intel es la única opción):
 
