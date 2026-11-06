@@ -36,7 +36,7 @@ if (!SELFTEST && !MAKE_ICON && !process.argv.some(x => x.startsWith("--panel-sho
 let settings, persisted, win, iconWin, panelWin, tray = null;   // tray: solo en Windows (macOS usa el Dock)
 const startedAt = Date.now();
 let orgId = null, busy = false, errors = 0, loginShown = false, quitting = false;
-let pollTimer = null, saveTimer = null, lastIconKey = "", lastMenuKey = "", renderChain = Promise.resolve();
+let pollTimer = null, saveTimer = null, lastIconKey = "", lastMenuKey = "", renderChain = Promise.resolve(), taskbarIcon = null;
 const STALE_MS = 5 * 60 * 1000;       // sin lecturas nuevas en 5 min: el ícono se pone gris en vez de mostrar un dato viejo
 const LOAD_TIMEOUT_MS = 30000;        // si claude.ai no termina de cargar en 30 s, se muestra la ventana y se avisa
 const startedConnecting = { at: 0 };
@@ -159,8 +159,8 @@ function iconParamsNow() {
   const { level, text } = engine.badgeInfo(state, settings.mode, now);
   return { level, text, params: engine.iconParams(state, level, now, text, settings.shape, "255,255,255", settings.alpha, { scale: settings.numScale, dx: settings.numDx, dy: settings.numDy }) };
 }
-async function drawDockIcon(params, size = 512) {
-  const dataUrl = await iconWin.webContents.executeJavaScript(`renderIcon(${JSON.stringify(params)}, ${size})`);
+async function drawDockIcon(params, size = 512, plate = process.platform === "darwin") {   // en Windows sin placa: el anillo llena todo el ícono
+  const dataUrl = await iconWin.webContents.executeJavaScript(`renderIcon(${JSON.stringify(params)}, ${size}, ${plate})`);
   return nativeImage.createFromDataURL(dataUrl);
 }
 // Solo se redibuja si algo visible cambió; las llamadas se encadenan para no solaparse.
@@ -174,7 +174,12 @@ function render(force) {
       if (process.env.USAGE_MONITOR_DEBUG) console.log(new Date().toISOString().slice(11, 23), "ícono", key);
       const img = await drawDockIcon(params);
       if (app.dock) app.dock.setIcon(img);
-      if (tray) tray.setImage(img.resize({ width: 32, height: 32, quality: "best" }));
+      if (tray) {
+        tray.setImage(img.resize({ width: 32, height: 32, quality: "best" }));
+        // Windows: las ventanas abiertas muestran el mismo ícono en la barra de tareas, más grande que el de la bandeja.
+        taskbarIcon = img.resize({ width: 256, height: 256, quality: "best" });
+        for (const w of [panelWin, win]) if (w && !w.isDestroyed()) w.setIcon(taskbarIcon);
+      }
     } catch (e) { console.error("no se pudo dibujar el ícono:", e.message); }
   });
   return renderChain;
@@ -206,27 +211,27 @@ function updateSetting(key, value) {
 function menuTemplate() {
   const lines = statusLines().map(label => ({ label, enabled: false }));
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
-  return [
-    ...lines, { type: "separator" },
-    { label: "Abrir panel (gráficos y ajustes)", click: showPanel },
-    { label: "Actualizar ahora", click: () => tick() },
-    { label: "Forma del ícono", submenu: radio([["Dos anillos", "rings"], ["Donut + anillo de tiempo", "donut"], ["Torta 1 (uso)", "pie1"], ["Torta 2 (uso + anillo de tiempo)", "pie2"], ["Torta 3 (uso + torta de tiempo)", "pie3"]], settings.shape, v => updateSetting("shape", v)) },
-    { label: "Qué muestra el número", submenu: radio([["Veredicto (solo si hay riesgo)", "pace"], ["Probabilidad de agotarlo", "prob"], ["Porcentaje de uso", "percent"], ["Tiempo hasta el límite", "limit"], ["Tiempo hasta el reinicio", "reset"]], settings.mode, v => updateSetting("mode", v)) },
-    { label: "Transparencia del número", submenu: radio([["30 %", 0.3], ["50 %", 0.5], ["70 %", 0.7], ["90 %", 0.9], ["100 %", 1]], settings.alpha, v => updateSetting("alpha", v)) },
+  // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
+  const more = [
     { label: "Fuente de datos", submenu: radio([["Automática (con prioridad y respaldo)", "auto"], ["Solo cuenta de Claude Code (sin login)", "oauth"], ["Solo archivo de Claude Code (línea de estado)", "claude-code"], ["Solo claude.ai (ventana propia)", "web"]], settings.source, v => updateSetting("source", v)) },
     { label: "Prioridad (en automática)", enabled: settings.source === "auto", submenu: radio([["Cuenta de Claude Code, luego archivo", "oauth"], ["Archivo de Claude Code, luego cuenta", "claude-code"], ["claude.ai, luego cuenta y archivo", "web"]], settings.priority, v => updateSetting("priority", v)) },
-    { label: "Conectar con Claude Code…", click: connectClaudeCode },
-    { label: "Desconectar de Claude Code…", click: disconnectClaudeCode },
+    claudeCode.isConnected() ? { label: "Desconectar de Claude Code…", click: disconnectClaudeCode } : { label: "Conectar con Claude Code…", click: connectClaudeCode },
+    ...(sourceOrder().includes("web") ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
     { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
     { type: "separator" },
-    { label: "Alertas", type: "checkbox", checked: settings.alerts, click: m => updateSetting("alerts", m.checked) },
     { label: "Abrir al iniciar sesión", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: m => app.setLoginItemSettings({ openAtLogin: m.checked }) },
-    { label: "Ventana de claude.ai…", click: showLogin },
     ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : [])
+  ];
+  return [
+    ...lines, { type: "separator" },
+    { label: "Abrir panel", click: showPanel },
+    { label: "Actualizar ahora", click: () => tick() },
+    { label: "Más opciones", submenu: more },
+    ...(tray ? [{ type: "separator" }, { label: "Salir", click: () => app.quit() }] : [])   // en macOS el Dock ya trae «Salir»
   ];
 }
 function refreshChrome(force) {
-  const key = statusLines().join("|") + JSON.stringify(settings);
+  const key = statusLines().join("|") + JSON.stringify(settings) + claudeCode.isConnected();
   if (!force && key === lastMenuKey) return;      // el menú solo se reconstruye si cambió algo
   lastMenuKey = key;
   if (app.dock) app.dock.setMenu(Menu.buildFromTemplate(menuTemplate()));
@@ -249,6 +254,7 @@ function showPanel() {
       ...panelBounds(), useContentSize: true, minWidth: 340, minHeight: 420, title: "Usage Monitor", backgroundColor: "#0d0d0d",
       webPreferences: { preload: path.join(__dirname, "panel-preload.js"), contextIsolation: false }
     });
+    if (taskbarIcon) panelWin.setIcon(taskbarIcon);
     panelWin.on("closed", () => { panelWin = null; });
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
     panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"));
@@ -319,6 +325,7 @@ async function connectClaudeCode() {
 async function disconnectClaudeCode() {
   try {
     const res = claudeCode.disconnect();
+    refreshChrome(true); notifyPanel();
     await dialog.showMessageBox({ type: "info", message: res.status === "removed" ? "Desconectado." : "No estaba conectado.", detail: res.backup ? `Respaldo: ${res.backup}` : "", buttons: ["Aceptar"] });
   } catch (e) { dialog.showErrorBox("No se pudo desconectar", e.message); }
 }
@@ -328,6 +335,7 @@ function showLogin() { if (win) { win.show(); win.focus(); } }
 function createSessionWindow() {
   const ses = session.fromPartition("persist:claude");      // las cookies de claude.ai se conservan entre ejecuciones
   win = new BrowserWindow({ ...fitToScreen(1000, 760), minWidth: 480, minHeight: 420, show: false, title: "claude.ai", webPreferences: { partition: "persist:claude", backgroundThrottling: false } });
+  if (taskbarIcon) win.setIcon(taskbarIcon);
   win.webContents.setWindowOpenHandler(() => ({ action: "allow" }));   // el inicio de sesión con Google abre una ventana
   win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.webContents.on("did-finish-load", () => { if (!busy && !MOCK) setTimeout(tick, 1500); });
