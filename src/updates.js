@@ -45,7 +45,10 @@ function latestRelease(releases, { includeDev = false } = {}) {
     if (!includeDev && isPrerelease(r.tag_name)) continue;
     if (!best || compareVersions(r.tag_name, best.tag_name) > 0) best = r;
   }
-  return best && { version: clean(best.tag_name), url: best.html_url || null };
+  const assets = best && Array.isArray(best.assets)
+    ? best.assets.map(a => ({ name: a.name, url: a.browser_download_url, size: a.size || 0, digest: a.digest || null })).filter(a => a.name && a.url)
+    : [];
+  return best && { version: clean(best.tag_name), url: best.html_url || null, ...(assets.length ? { assets } : {}) };
 }
 // Canal de actualizaciones: "main" (solo estables) o "dev" (también las X.Y.Z-dev.N). Sin elegir, la app de dev sigue dev.
 const CHANNELS = ["main", "dev"];

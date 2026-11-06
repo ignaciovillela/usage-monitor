@@ -221,3 +221,11 @@ input[type="range"] { width: 100%; accent-color: var(--series-1); }
 
 .summary-list { margin: 0 0 9px; padding-left: 18px; color: var(--ink-2); }
 .summary-list li { margin: 0 0 3px; }
+
+/* Barra de descarga de la actualizaci?n */
+.progress { position: relative; height: 6px; border-radius: 3px; background: var(--grid, rgba(127,127,127,.25)); overflow: hidden; margin: 4px 0 8px; }
+.progress-fill { height: 100%; width: 0; border-radius: 3px; background: var(--series-1); transition: width .2s linear; }
+.progress.indeterminate .progress-fill { width: 35%; position: absolute; animation: progress-slide 1.2s ease-in-out infinite; }
+@keyframes progress-slide { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .progress.indeterminate .progress-fill { animation: none; width: 100%; opacity: .5; } }
+.progress-text { font-variant-numeric: tabular-nums; }

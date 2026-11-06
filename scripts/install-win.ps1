@@ -24,6 +24,11 @@
 #   -InstallDir <ruta>  otra carpeta de instalación.
 #   -NoStart            no abrir la app al terminar.
 #   -Quiet              sin mensajes (lo usa la tarea programada).
+# Los usa la app al pulsar «Actualizar ahora» (ella descarga el zip con barra de progreso y comprueba su sha256):
+#   -ZipPath <zip> -Tag <vX.Y.Z>  instalar ese zip en vez de buscar y descargar.
+#   -WaitPid <pid>      esperar a que la app se cierre antes de reemplazarla, y volver a abrirla después.
+#   -Relaunch <exe>     si algo falla, abrir este .exe (la versión que se estaba usando).
+#   -ErrorLog <archivo> si algo falla, dejar ahí el error (la app lo muestra al volver a abrirse).
 # También se puede activar con $env:USAGE_MONITOR_AUTOUPDATE = "1" antes de "irm ... | iex".
 [CmdletBinding()]
 param(
@@ -33,8 +38,20 @@ param(
   [ValidateSet('', 'main', 'dev')][string]$Channel = '',
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Usage Monitor'),
   [switch]$NoStart,
-  [switch]$Quiet
+  [switch]$Quiet,
+  [string]$ZipPath = '',
+  [string]$Tag = '',
+  [int]$WaitPid = 0,
+  [string]$Relaunch = '',
+  [string]$ErrorLog = ''
 )
+# Con -ErrorLog (lo pasa la app): cualquier error se guarda ahí y se vuelve a abrir la versión que estaba en uso.
+trap {
+  if (-not $ErrorLog) { break }
+  try { Set-Content -LiteralPath $ErrorLog -Value "$_" -Encoding UTF8 } catch { }
+  if ($Relaunch -and (Test-Path -LiteralPath $Relaunch)) { Start-Process -FilePath $Relaunch }
+  exit 1
+}
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # en PowerShell 5.1 la barra de progreso hace lentísima la descarga
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -48,6 +65,7 @@ $Updater   = Join-Path $env:LOCALAPPDATA 'Usage Monitor Updater\install-win.ps1'
 $Shortcut  = Join-Path ([Environment]::GetFolderPath('Programs')) 'Usage Monitor.lnk'
 if ($env:USAGE_MONITOR_AUTOUPDATE -eq '1') { $AutoUpdate = $true }
 if ($Quiet) { $NoStart = $true }   # la tarea programada solo reabre la app si la cerró para actualizar
+if ($WaitPid) { $NoStart = $false }   # la app se cerró para actualizarse: se vuelve a abrir
 
 function Say($m) { if (-not $Quiet) { Write-Host $m } }
 
@@ -84,6 +102,20 @@ if (-not [Environment]::Is64BitOperatingSystem) { throw 'Los instaladores public
 
 $installed = if ((Test-Path $VerFile) -and (Test-Path $Exe)) { (Get-Content $VerFile -Raw).Trim() } else { '' }
 
+# Orden por versión (no por fecha): vX.Y.Z-dev.N va antes que vX.Y.Z. Otras etiquetas se ignoran.
+function Get-VersionKey($tag) {
+  if ($tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$') { return $null }
+  $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
+  return '{0:D6}.{1:D6}.{2:D6}.{3:D10}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $build
+}
+
+if ($ZipPath) {
+  # Zip ya descargado (y verificado) por la app.
+  if (-not (Test-Path -LiteralPath $ZipPath)) { throw "No existe el archivo de la actualización: $ZipPath" }
+  if (-not (Get-VersionKey $Tag)) { throw "Versión no válida: '$Tag'" }
+  $tag = $Tag
+  $assetName = Split-Path $ZipPath -Leaf
+} else {
 # Canal: el parámetro; si no, el elegido en la app; si no, el de la versión instalada; si no, main.
 if (-not $Channel) {
   try {
@@ -92,13 +124,6 @@ if (-not $Channel) {
   } catch { }
 }
 if (-not $Channel) { $Channel = if ($installed -match '-dev\.') { 'dev' } else { 'main' } }
-
-# Orden por versión (no por fecha): vX.Y.Z-dev.N va antes que vX.Y.Z. Otras etiquetas se ignoran.
-function Get-VersionKey($tag) {
-  if ($tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$') { return $null }
-  $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
-  return '{0:D6}.{1:D6}.{2:D6}.{3:D10}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $build
-}
 
 Say "Buscando la última versión (canal $Channel)…"
 $releases = Invoke-RestMethod -UseBasicParsing -Headers @{ 'User-Agent' = 'usage-monitor-installer' } `
@@ -110,19 +135,28 @@ $release = $releases |
 if (-not $release) { throw "No encontré un instalador de Windows del canal $Channel en https://github.com/$Repo/releases" }
 $asset = $release.assets | Where-Object name -like '*windows-x64.zip' | Select-Object -First 1
 $tag = $release.tag_name
+$assetName = $asset.name
+}
+
 if ($installed -eq $tag) {
   Say "Ya tienes la última versión ($tag)."
+  if ($ZipPath) { Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue }
 } else {
   $tmp = Join-Path ([IO.Path]::GetTempPath()) ("usage-monitor-" + [guid]::NewGuid())
   New-Item -ItemType Directory $tmp | Out-Null
   try {
-    Say "Descargando $($asset.name)…"
-    $zip = Join-Path $tmp 'app.zip'
-    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
-    Expand-Archive $zip (Join-Path $tmp 'x')
+    if ($ZipPath) {
+      $zip = $ZipPath
+    } else {
+      Say "Descargando $assetName…"
+      $zip = Join-Path $tmp 'app.zip'
+      Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $zip
+    }
+    Expand-Archive -LiteralPath $zip (Join-Path $tmp 'x')
     $newExe = Get-ChildItem (Join-Path $tmp 'x') -Recurse -Filter 'Usage Monitor.exe' | Select-Object -First 1
     if (-not $newExe) { throw 'El zip no contiene Usage Monitor.exe.' }
 
+    if ($WaitPid) { Wait-Process -Id $WaitPid -Timeout 60 -ErrorAction SilentlyContinue }   # la app se está cerrando
     $wasRunning = Stop-App
     $old = "$InstallDir.old"
     Remove-Item $old -Recurse -Force -ErrorAction SilentlyContinue
@@ -140,6 +174,7 @@ if ($installed -eq $tag) {
     if ($Quiet -and $wasRunning) { $NoStart = $false }
   } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    if ($ZipPath) { Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue }
   }
 }
 
@@ -168,6 +203,7 @@ if ($AutoUpdate) {
 }
 
 if (-not $NoStart) {
+  if ($WaitPid) { Wait-Process -Id $WaitPid -Timeout 60 -ErrorAction SilentlyContinue }   # una sola instancia a la vez
   Start-Process $Exe -WorkingDirectory $InstallDir
   Say 'Abriendo Usage Monitor… el ícono aparece en la bandeja, junto al reloj (puede quedar bajo «^»).'
 }

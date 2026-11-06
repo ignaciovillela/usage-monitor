@@ -8,6 +8,7 @@ const { parseUsage, pageScript } = require("./providers/claude");
 const claudeCode = require("./providers/claude-code");
 const remote = require("./providers/remote");
 const updates = require("./updates");
+const selfupdate = require("./selfupdate");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -183,30 +184,111 @@ function openRelease(url) {
   if (url && known && /^https:\/\//.test(url)) shell.openExternal(url);
 }
 
-// Instalar desde la app (solo Windows con la app instalada por scripts/install-win.ps1, que deja «.release-tag» junto
-// al .exe): se copia el instalador que viene dentro de la app y se ejecuta aparte; cierra la app, la reemplaza por la
-// última versión del canal elegido y la vuelve a abrir.
-const installDir = () => path.dirname(process.execPath);
-const canSelfInstall = () => process.platform === "win32" && app.isPackaged && fs.existsSync(path.join(installDir(), ".release-tag"));
-const bundledInstaller = () => fs.readFileSync(path.join(__dirname, "..", "scripts", "install-win.ps1"));
-// La tarea de actualización automática ejecuta una copia local del instalador: se mantiene igual a la de esta versión.
-function refreshUpdaterCopy() {
-  if (!canSelfInstall()) return;
-  const copy = path.join(process.env.LOCALAPPDATA || "", "Usage Monitor Updater", "install-win.ps1");
-  try { if (fs.existsSync(copy)) fs.writeFileSync(copy, bundledInstaller()); } catch (e) { console.error("no se pudo actualizar el instalador local:", e.message); }
-}
-function installUpdate() {
-  if (!canSelfInstall()) return;
-  try {
-    const file = path.join(app.getPath("userData"), "install-win.ps1");
-    fs.writeFileSync(file, bundledInstaller());
-    require("child_process").spawn("powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", file, "-Quiet", "-Channel", updateChannel(), "-InstallDir", installDir()],
-      { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    if (Notification.isSupported()) new Notification({ title: "Usage Monitor", body: "Instalando la actualización… la app se cerrará y volverá a abrirse." }).show();
-  } catch (e) {
-    dialog.showErrorBox("Usage Monitor", `No se pudo iniciar la actualización: ${e.message}`);
+// ── Actualizar con un botón ─────────────────────────────────────────────────
+// La app descarga el instalador del release (con barra de progreso y comprobación sha256) y se lo pasa al script de
+// su sistema, que viene dentro de la app: scripts/install-win.ps1 (zip) o scripts/install-mac.sh (dmg). La app se
+// cierra; el script espera a que termine, reemplaza la app, la vuelve a abrir y, si algo falla, reabre la anterior y
+// deja el error en «last-update-error.txt», que se muestra en el panel al arrancar.
+const exeDir = () => path.dirname(process.execPath);
+const scriptInstalled = () => process.platform === "win32" && fs.existsSync(path.join(exeDir(), ".release-tag"));
+const updateErrorFile = () => path.join(app.getPath("userData"), "last-update-error.txt");
+const writable = dir => { try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch (_) { return false; } };
+// Dónde se instala, o null si desde aquí no se puede (desarrollo, Mac Intel, carpeta sin permiso de escritura…).
+function selfUpdateTarget() {
+  if (!app.isPackaged || MOCK || process.env.USAGE_MONITOR_DATA) return null;
+  if (process.platform === "win32" && process.arch === "x64") {
+    // Instalada por el script: se reemplaza en su sitio. Abierta desde un zip: se instala donde lo hace el script.
+    return { os: "win", dir: scriptInstalled() ? exeDir() : path.join(process.env.LOCALAPPDATA || "", "Programs", "Usage Monitor") };
   }
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    const bundle = path.resolve(process.execPath, "..", "..", "..");      // …/Usage Monitor.app/Contents/MacOS/Usage Monitor
+    const dir = path.basename(bundle) === "Usage Monitor.app" && writable(path.dirname(bundle)) ? path.dirname(bundle) : "/Applications";
+    return writable(dir) ? { os: "mac", dir, bundle } : null;
+  }
+  return null;
+}
+const updateAsset = () => latest && selfupdate.pickAsset(latest.assets);
+const canSelfInstall = () => !!selfUpdateTarget() && !!updateAsset();
+const bundledScript = name => fs.readFileSync(path.join(__dirname, "..", "scripts", name));
+// La tarea de actualización automática de Windows ejecuta una copia local del instalador: se mantiene igual a la de esta versión.
+function refreshUpdaterCopy() {
+  if (!scriptInstalled()) return;
+  const copy = path.join(process.env.LOCALAPPDATA || "", "Usage Monitor Updater", "install-win.ps1");
+  try { if (fs.existsSync(copy)) fs.writeFileSync(copy, bundledScript("install-win.ps1")); } catch (e) { console.error("no se pudo actualizar el instalador local:", e.message); }
+}
+
+// Estado de la actualización en curso: { phase: "download" | "install" | "error", version, received, total, error }.
+let updateJob = null;
+const publicJob = () => updateJob && { phase: updateJob.phase, version: updateJob.version, received: updateJob.received || 0, total: updateJob.total || 0, error: updateJob.error || null };
+function pushProgress(phaseChanged) {
+  const j = publicJob();
+  if (panelWin && !panelWin.isDestroyed()) {
+    panelWin.webContents.send("storage-changed", { updateProgress: { newValue: j } });
+    // Barra también en el ícono de la barra de tareas (Windows) o del Dock (macOS) mientras el panel está abierto.
+    panelWin.setProgressBar(j && j.phase === "download" && j.total ? j.received / j.total : j && j.phase === "install" ? 2 : -1);
+  }
+  if (phaseChanged) refreshChrome(true);
+}
+async function installUpdate() {
+  if (updateJob && updateJob.phase !== "error") return;      // ya hay una en curso
+  const target = selfUpdateTarget(), asset = updateAsset();
+  if (!target || !asset) { if (latest && latest.url) openRelease(latest.url); return; }
+  const version = latest.version, controller = new AbortController();
+  updateJob = { phase: "download", version, received: 0, total: asset.size, controller };
+  pushProgress(true);
+  const file = path.join(app.getPath("temp"), `usage-monitor-update-${process.pid}-${asset.name}`);
+  try {
+    await selfupdate.download(asset, file, {
+      signal: controller.signal, userAgent: `usage-monitor/${app.getVersion()}`,
+      onProgress: (received, total) => { updateJob.received = received; updateJob.total = total; pushProgress(false); }
+    });
+  } catch (e) {
+    updateJob = controller.signal.aborted ? null : { phase: "error", version, error: e.message || String(e) };
+    pushProgress(true);
+    return;
+  }
+  updateJob = { ...updateJob, phase: "install", controller: null };
+  pushProgress(true);
+  try {
+    launchInstaller(target, file, version);
+  } catch (e) {
+    fs.rmSync(file, { force: true });
+    updateJob = { phase: "error", version, error: `No se pudo iniciar el instalador: ${e.message}` };
+    pushProgress(true);
+    return;
+  }
+  // Windows registra el inicio automático con la ruta del .exe: la versión nueva lo vuelve a registrar con la suya.
+  if (process.platform === "win32" && app.getLoginItemSettings().openAtLogin) saveFlag("reapplyLogin", true);
+  setTimeout(() => app.quit(), 1200);      // el script espera a que este proceso termine
+}
+function cancelUpdate() { if (updateJob && updateJob.controller) updateJob.controller.abort(); }
+function launchInstaller(target, file, version) {
+  const { spawn } = require("child_process");
+  const opts = { detached: true, stdio: "ignore", windowsHide: true };
+  fs.rmSync(updateErrorFile(), { force: true });
+  if (target.os === "win") {
+    const script = path.join(app.getPath("userData"), "install-win.ps1");
+    fs.writeFileSync(script, bundledScript("install-win.ps1"));
+    spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-Quiet", "-ZipPath", file, "-Tag", `v${version}`, "-InstallDir", target.dir,
+      "-WaitPid", String(process.pid), "-Relaunch", process.execPath, "-ErrorLog", updateErrorFile()], opts).unref();
+  } else {
+    const script = path.join(app.getPath("userData"), "install-mac.sh");
+    fs.writeFileSync(script, bundledScript("install-mac.sh"));
+    spawn("/bin/bash", [script], { ...opts, env: { ...process.env, DMG: file, INSTALL_DIR: target.dir, WAIT_PID: String(process.pid),
+      RELAUNCH: target.bundle, ERROR_LOG: updateErrorFile(), OPEN: "1" } }).unref();
+  }
+}
+// Al arrancar: error de la última actualización (si la hubo) y el inicio automático tras cambiar de carpeta.
+function afterUpdateStartup() {
+  try {
+    const f = updateErrorFile();
+    if (fs.existsSync(f)) {
+      updateJob = { phase: "error", version: null, error: fs.readFileSync(f, "utf8").trim().slice(0, 500) || "La actualización falló." };
+      fs.rmSync(f, { force: true });
+    }
+  } catch (e) { console.error("no se pudo leer el error de la actualización:", e.message); }
+  if (settings.reapplyLogin) { app.setLoginItemSettings({ openAtLogin: true }); saveFlag("reapplyLogin", false); }
 }
 
 // Resumen de la actualización: al arrancar con otra versión que la última vez, se arma la lista de cambios (notas
@@ -361,7 +443,8 @@ function menuTemplate() {
   const lines = statusLines().map(label => ({ label, enabled: false }));
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
   const install = a => a.kind === "app" && canSelfInstall();
-  const advice = updateAdvice.map(a => ({
+  const job = publicJob();
+  const advice = job && job.phase !== "error" ? [{ label: job.phase === "download" ? `Descargando v${job.version}…` : `Instalando v${job.version}…`, click: showPanel }] : updateAdvice.map(a => ({
     label: a.kind === "server" ? `Actualiza el servidor a v${a.version}…` : install(a) ? `Instalar v${a.version} ahora` : `Actualización disponible: v${a.version}…`,
     click: () => install(a) ? installUpdate() : openRelease(a.url)
   }));
@@ -432,7 +515,7 @@ function storageSnapshot() {
     remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
     serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
     updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
-    updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary,
+    updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary, updateProgress: publicJob(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
@@ -457,6 +540,8 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "COPY_TOKEN_LINE" && /^[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
   if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
   if (message && message.type === "INSTALL_UPDATE") { installUpdate(); return { ok: true }; }
+  if (message && message.type === "CANCEL_UPDATE") { cancelUpdate(); return { ok: true }; }
+  if (message && message.type === "DISMISS_UPDATE_ERROR") { if (updateJob && updateJob.phase === "error") { updateJob = null; pushProgress(true); } return { ok: true }; }
   if (message && message.type === "DISMISS_UPDATE_SUMMARY") { saveFlag("updateSummary", null); refreshChrome(true); notifyPanel(); return { ok: true }; }
   return { ok: true };
 });
@@ -629,7 +714,7 @@ app.whenReady().then(async () => {
   if (!MOCK && settings.source === "web") createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   setTimeout(checkUpdates, 10000); setInterval(checkUpdates, UPDATE_CHECK_MS);
-  noteVersionChange(); refreshUpdaterCopy();
+  afterUpdateStartup(); noteVersionChange(); refreshUpdaterCopy();
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
   app.on("activate", () => { if (Date.now() - startedAt > 4000) showPanel(); });

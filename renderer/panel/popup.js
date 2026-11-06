@@ -475,7 +475,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -588,27 +588,63 @@ function renderVersions(data) {
   $("update-check").checked = data.updateCheck !== false;
   $("update-channel").value = data.updateChannel === "dev" ? "dev" : "main";
   renderUpdateSummary(data.updateSummary);
-  const advice = Array.isArray(data.updateAdvice) ? data.updateAdvice : [];
+  ui.updates = { advice: Array.isArray(data.updateAdvice) ? data.updateAdvice : [], canInstall: !!data.canInstallUpdate, progress: data.updateProgress || null };
+  renderUpdates();
+}
+const MB = n => `${(n / 1048576).toFixed(0)} MB`;
+const button = (text, primary, onClick) => { const b = html("button"); b.className = primary ? "text-btn primary" : "text-btn"; b.textContent = text; b.addEventListener("click", onClick); return b; };
+// Tarjeta de actualización: el aviso con «Actualizar ahora» o, si ya empezó, la barra de descarga, la instalación o el error.
+// Se vuelve a dibujar con cada avance de la descarga (la app manda «updateProgress» sin recargar el resto del panel).
+function renderUpdates() {
+  const { advice = [], canInstall = false, progress: job = null } = ui.updates || {};
   const box = $("updates");
-  box.hidden = !advice.length;
+  box.hidden = !advice.length && !job;
   box.replaceChildren();
-  if (!advice.length) return;
-  const h = html("h2"); h.textContent = advice.some(a => a.switch) ? "Cambiar a la versión estable" : advice.some(a => a.kind === "app") ? "Actualización disponible" : "Actualiza el servidor";
+  if (box.hidden) return;
+  const row = html("div"); row.className = "connect-actions";
+  const h = html("h2");
+  if (job && job.phase === "download") {
+    const pct = job.total ? Math.min(100, Math.round(job.received / job.total * 100)) : null;
+    h.textContent = `Descargando v${job.version}`;
+    const bar = html("div"); bar.className = "progress" + (pct == null ? " indeterminate" : "");
+    bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+    if (pct != null) bar.setAttribute("aria-valuenow", String(pct));
+    const fill = html("div"); fill.className = "progress-fill"; if (pct != null) fill.style.width = `${pct}%`;
+    bar.append(fill);
+    const p = html("p"); p.className = "progress-text";
+    p.textContent = pct == null ? `${MB(job.received)} descargados` : `${pct} % · ${MB(job.received)} de ${MB(job.total)}`;
+    row.append(button("Cancelar", false, () => chrome.runtime.sendMessage({ type: "CANCEL_UPDATE" })));
+    box.append(h, bar, p, row);
+    return;
+  }
+  if (job && job.phase === "install") {
+    h.textContent = `Instalando v${job.version}`;
+    const bar = html("div"); bar.className = "progress indeterminate"; bar.append(Object.assign(html("div"), { className: "progress-fill" }));
+    const p = html("p"); p.textContent = "Descarga verificada. La app se cerrará y volverá a abrirse en unos segundos.";
+    box.append(h, bar, p);
+    return;
+  }
+  if (job && job.phase === "error") {
+    h.textContent = "No se pudo actualizar";
+    const p = html("p"); p.textContent = job.error || "Error desconocido.";
+    box.append(h, p);
+    if (advice.some(a => a.kind === "app") && canInstall) row.append(button("Reintentar", true, () => chrome.runtime.sendMessage({ type: "INSTALL_UPDATE" })));
+    row.append(button("Cerrar", !row.childElementCount, () => chrome.runtime.sendMessage({ type: "DISMISS_UPDATE_ERROR" })));
+    box.append(row);
+    return;
+  }
+  h.textContent = advice.some(a => a.switch) ? "Cambiar a la versión estable" : advice.some(a => a.kind === "app") ? "Actualización disponible" : "Actualiza el servidor";
   box.append(h);
   for (const a of advice) { const p = html("p"); p.textContent = a.text; box.append(p); }
-  const row = html("div"); row.className = "connect-actions";
   const appAdvice = advice.find(a => a.kind === "app");
-  if (appAdvice && data.canInstallUpdate) {      // Windows con la app instalada por el script: se instala desde aquí
-    const b = html("button"); b.className = "text-btn primary"; b.textContent = `Instalar v${appAdvice.version}`;
-    b.addEventListener("click", () => { b.disabled = true; b.textContent = "Instalando…"; chrome.runtime.sendMessage({ type: "INSTALL_UPDATE" }); });
-    row.append(b);
+  if (appAdvice && canInstall) {      // la app descarga e instala sola (Windows x64 y macOS Apple Silicon empaquetadas)
+    row.append(button(appAdvice.switch ? `Instalar v${appAdvice.version}` : "Actualizar ahora", true, e => {
+      e.currentTarget.disabled = true;
+      chrome.runtime.sendMessage({ type: "INSTALL_UPDATE" });
+    }));
   }
   const url = (advice.find(a => a.url) || {}).url;
-  if (url) {
-    const b = html("button"); b.className = row.childElementCount ? "text-btn" : "text-btn primary"; b.textContent = "Ver novedades";
-    b.addEventListener("click", () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url }));
-    row.append(b);
-  }
+  if (url) row.append(button("Ver novedades", !row.childElementCount, () => chrome.runtime.sendMessage({ type: "OPEN_RELEASE", url })));
   if (row.childElementCount) box.append(row);
 }
 // Tarjeta «Actualizado a vX»: lo que cambió desde la versión anterior, hasta que la cierres.
@@ -708,6 +744,7 @@ $("import").addEventListener("click", () => {
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && (changes[STATE_KEY] || changes[SAMPLES_KEY])) load();
+  if (area === "local" && changes.updateProgress) { ui.updates = { ...(ui.updates || {}), progress: changes.updateProgress.newValue }; renderUpdates(); }
 });
 setInterval(() => { model.now = Date.now(); renderSummary(); }, 15000);
 
