@@ -179,7 +179,10 @@ function windowSpec() {
   const fc = s.forecast && s.forecast.engine === "prob" && s.forecast.band ? s.forecast : null;
   const bandPts = fc ? fc.band.map(([min, lo, mid, hi]) => ({ ts: fc.at + min * MINUTE, lo, mid, hi })) : null;
   if (fc) {
-    end = { ts: t1, value: fc.finalQ[1], hit: false, label: `~${Math.round(fc.finalQ[1])} %` };
+    // Si lo más probable es agotarlo, la proyección termina en el 100 % (a la hora mediana), no sigue plana hasta el reinicio.
+    end = fc.hitQ && fc.pHit >= 0.5 && fc.hitQ[1] < t1
+      ? { ts: Math.max(last.ts, fc.hitQ[1]), value: 100, hit: true, prob: true }
+      : { ts: t1, value: fc.finalQ[1], hit: false, label: `~${Math.round(fc.finalQ[1])} %` };
   } else if (Number.isFinite(s.rate) && Number.isFinite(proj.valueAtReset)) {
     end = proj.rising && proj.willHit
       ? { ts: proj.hitAt, value: 100, hit: true }
@@ -255,7 +258,10 @@ function windowSpec() {
         const up = bandPts.map(b => `${x(b.ts).toFixed(1)},${y(b.hi).toFixed(1)}`);
         const down = bandPts.map(b => `${x(b.ts).toFixed(1)},${y(b.lo).toFixed(1)}`).reverse();
         svg("path", { class: "band", d: `M${up.join("L")}L${down.join("L")}Z` }, root);
-        svg("path", { class: "proj", d: "M" + [`${x(last.ts).toFixed(1)},${y(last.value).toFixed(1)}`].concat(bandPts.slice(1).map(b => `${x(b.ts).toFixed(1)},${y(b.mid).toFixed(1)}`)).join("L") }, root);
+        const mids = end.prob
+          ? bandPts.slice(1).filter(b => b.ts < end.ts).map(b => ({ ts: b.ts, value: Math.min(100, b.mid) })).concat({ ts: end.ts, value: 100 })
+          : bandPts.slice(1).map(b => ({ ts: b.ts, value: b.mid }));
+        svg("path", { class: "proj", d: "M" + [last].concat(mids).map(p => `${x(p.ts).toFixed(1)},${y(p.value).toFixed(1)}`).join("L") }, root);
       } else if (end) {
         svg("path", { class: "proj", d: `M${x(last.ts).toFixed(1)},${y(last.value).toFixed(1)}L${x(end.ts).toFixed(1)},${y(end.value).toFixed(1)}` }, root);
       }
@@ -267,16 +273,17 @@ function windowSpec() {
         const endDot = svg("circle", { class: `dot ${end.hit ? "critical" : ""}`, r: 4, cx: x(end.ts), cy: y(end.value) }, root);
         const text = end.hit ? `100% · ${fmtClock(end.ts)}` : `~${fmtPct(end.value, 0)}`;
         // Motor probabilístico: punto rojo en la hora más probable de agotarlo (si se agota), solo con la hora.
+        // Si la proyección ya termina ahí, ese mismo punto final es el rojo (no se dibuja otro encima).
         if (fc && fc.hitQ && fc.pHit >= 0.25) {
           const hx = x(fc.hitQ[1]), hy = y(100);
-          const hitDot = svg("circle", { class: "dot critical", r: 4, cx: hx, cy: hy }, root);
+          const hitDot = end.prob ? endDot : svg("circle", { class: "dot critical", r: 4, cx: hx, cy: hy }, root);
           const hitLabel = svg("text", { class: "label", "text-anchor": "middle", x: Math.min(m.l + pw - 14, Math.max(m.l + 14, hx)), y: hy - 9 }, root); // encima del gráfico, sobre el punto
           hitLabel.textContent = fmtClock(fc.hitQ[1]);
           const why = `Si te quedas sin límite, lo más probable es a las ${fmtClock(fc.hitQ[1])} (probabilidad ${Math.round(fc.pHit * 100)} %)`;
           svg("title", {}, hitDot).textContent = why;
           svg("title", {}, hitLabel).textContent = why;
         }
-        if (end.hit) { // etiqueta solo en el motor lineal; en el probabilístico el extremo ya lo dice la loseta "Al reinicio"
+        if (end.hit && !end.prob) { // etiqueta solo en el motor lineal; en el probabilístico el extremo ya lo dice la loseta "Al reinicio"
           const label = svg("text", { class: "label", "text-anchor": "end" }, root);
           label.textContent = end.label || `⚠ 100% · ${fmtClock(end.ts)}`;
           svg("title", {}, label).textContent = `Hora estimada en que llegarías al 100 %: ${fmtClock(end.ts)}`;
