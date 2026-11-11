@@ -179,9 +179,16 @@ function windowSpec() {
   const fc = s.forecast && s.forecast.engine === "prob" && s.forecast.band ? s.forecast : null;
   const bandPts = fc ? fc.band.map(([min, lo, mid, hi]) => ({ ts: fc.at + min * MINUTE, lo, mid, hi })) : null;
   if (fc) {
-    // Si lo más probable es agotarlo, la proyección termina en el 100 % (a la hora mediana), no sigue plana hasta el reinicio.
-    end = fc.hitQ && fc.pHit >= 0.5 && fc.hitQ[1] < t1
-      ? { ts: Math.max(last.ts, fc.hitQ[1]), value: 100, hit: true, prob: true }
+    // Si la proyección llega al 100 %, termina ahí (no sigue plana hasta el reinicio): a la hora mediana de agotarlo
+    // cuando lo más probable es agotarlo, o donde la mediana de la banda toca el 100 % si no.
+    let cross = null;
+    for (let i = 1; i < bandPts.length && cross === null; i++) {
+      const a = bandPts[i - 1], b = bandPts[i];
+      if (b.mid >= 100) cross = a.mid >= 100 ? a.ts : a.ts + (b.ts - a.ts) * (100 - a.mid) / (b.mid - a.mid);
+    }
+    const hitTs = fc.hitQ && fc.pHit >= 0.5 && fc.hitQ[1] < t1 ? fc.hitQ[1] : cross !== null && cross < t1 ? cross : null;
+    end = hitTs !== null
+      ? { ts: Math.max(last.ts, hitTs), value: 100, hit: true, prob: true }
       : { ts: t1, value: fc.finalQ[1], hit: false, label: `~${Math.round(fc.finalQ[1])} %` };
   } else if (Number.isFinite(s.rate) && Number.isFinite(proj.valueAtReset)) {
     end = proj.rising && proj.willHit
@@ -273,13 +280,16 @@ function windowSpec() {
         const endDot = svg("circle", { class: `dot ${end.hit ? "critical" : ""}`, r: 4, cx: x(end.ts), cy: y(end.value) }, root);
         const text = end.hit ? `100% · ${fmtClock(end.ts)}` : `~${fmtPct(end.value, 0)}`;
         // Motor probabilístico: punto rojo en la hora más probable de agotarlo (si se agota), solo con la hora.
-        // Si la proyección ya termina ahí, ese mismo punto final es el rojo (no se dibuja otro encima).
-        if (fc && fc.hitQ && fc.pHit >= 0.25) {
-          const hx = x(fc.hitQ[1]), hy = y(100);
+        // Si la proyección termina en el 100 %, su punto final es el único rojo, con su hora.
+        if (end.prob || (fc && fc.hitQ && fc.pHit >= 0.25)) {
+          const hitTs = end.prob ? end.ts : fc.hitQ[1];
+          const hx = x(hitTs), hy = y(100);
           const hitDot = end.prob ? endDot : svg("circle", { class: "dot critical", r: 4, cx: hx, cy: hy }, root);
           const hitLabel = svg("text", { class: "label", "text-anchor": "middle", x: Math.min(m.l + pw - 14, Math.max(m.l + 14, hx)), y: hy - 9 }, root); // encima del gráfico, sobre el punto
-          hitLabel.textContent = fmtClock(fc.hitQ[1]);
-          const why = `Si te quedas sin límite, lo más probable es a las ${fmtClock(fc.hitQ[1])} (probabilidad ${Math.round(fc.pHit * 100)} %)`;
+          hitLabel.textContent = fmtClock(hitTs);
+          const why = end.prob && fc.pHit < 0.5
+            ? `La proyección llega al 100 % a las ${fmtClock(hitTs)} (probabilidad de agotarlo ${Math.round(fc.pHit * 100)} %)`
+            : `Si te quedas sin límite, lo más probable es a las ${fmtClock(hitTs)} (probabilidad ${Math.round(fc.pHit * 100)} %)`;
           svg("title", {}, hitDot).textContent = why;
           svg("title", {}, hitLabel).textContent = why;
         }
