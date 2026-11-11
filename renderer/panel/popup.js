@@ -262,8 +262,10 @@ function windowSpec() {
         svg("path", { class: "line", d: path }, root);
       }
       if (bandPts) {
-        const up = bandPts.map(b => `${x(b.ts).toFixed(1)},${y(b.hi).toFixed(1)}`);
-        const down = bandPts.map(b => `${x(b.ts).toFixed(1)},${y(b.lo).toFixed(1)}`).reverse();
+        // Si la proyección termina en el 100 %, la banda también se corta ahí.
+        const shownBand = end.prob ? bandPts.filter(b => b.ts < end.ts).concat({ ts: end.ts, ...bandAt(end.ts) }) : bandPts;
+        const up = shownBand.map(b => `${x(b.ts).toFixed(1)},${y(b.hi).toFixed(1)}`);
+        const down = shownBand.map(b => `${x(b.ts).toFixed(1)},${y(b.lo).toFixed(1)}`).reverse();
         svg("path", { class: "band", d: `M${up.join("L")}L${down.join("L")}Z` }, root);
         const mids = end.prob
           ? bandPts.slice(1).filter(b => b.ts < end.ts).map(b => ({ ts: b.ts, value: Math.min(100, b.mid) })).concat({ ts: end.ts, value: 100 })
