@@ -783,6 +783,8 @@ if (location.hash === "#settings") showSettings(true);
 setInterval(() => { model.now = Date.now(); renderSummary(); }, 15000);
 
 load().then(() => {
+  // La ventana toma el alto que pide la vista de uso (sin espacio vacío al pie); los ajustes, más largos, se desplazan.
+  if (!$("view-usage").hidden) chrome.runtime.sendMessage({ type: "PANEL_FIT", height: Math.ceil(document.querySelector("main").getBoundingClientRect().height) });
   // Al abrir, refrescar si el dato tiene más de 30 s.
   if (!model.state.updatedAt || Date.now() - model.state.updatedAt > 30000) pollNow();
 });

@@ -475,7 +475,16 @@ function fitToScreen(width, height) {
 }
 function panelBounds() {
   const forced = /^(\d+)x(\d+)$/.exec(process.env.USAGE_MONITOR_PANEL_SIZE || "");
-  return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 900);
+  return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 700);
+}
+// El panel avisa cuánto mide su vista de uso tras el primer render; la ventana se ajusta a eso una sola vez
+// (después manda el tamaño que elija quien la use) y nunca más alto que la pantalla.
+function fitPanel(height) {
+  if (!panelWin || panelWin.isDestroyed() || panelWin.fitted || process.env.USAGE_MONITOR_PANEL_SIZE) return;
+  panelWin.fitted = true;
+  if (!(height > 0)) return;
+  const [width] = panelWin.getContentSize();
+  panelWin.setContentSize(width, fitToScreen(width, Math.max(420, Math.ceil(height))).height);
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
 // view = "settings" abre directamente la vista de ajustes.
@@ -532,6 +541,7 @@ ipcMain.handle("storage-set", (_e, obj) => {
 });
 ipcMain.handle("storage-remove", () => undefined);
 ipcMain.handle("runtime-message", async (_e, message) => {
+  if (message && message.type === "PANEL_FIT") return fitPanel(Number(message.height));
   if (message && message.type === "IMPORT_CSV") return importCsv();
   if (message && message.type === "POLL_NOW") await tick({ manual: true });
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
