@@ -184,7 +184,8 @@ function windowSpec() {
     let cross = null;
     for (let i = 1; i < bandPts.length && cross === null; i++) {
       const a = bandPts[i - 1], b = bandPts[i];
-      if (b.mid >= 100) cross = a.mid >= 100 ? a.ts : a.ts + (b.ts - a.ts) * (100 - a.mid) / (b.mid - a.mid);
+      // «Lleno» con el mismo umbral que el modelo (FULL_CAP, 99,5 %): la mediana puede quedarse en 99,9 sin tocar 100.
+      if (b.mid >= FULL_CAP) cross = a.mid >= FULL_CAP ? a.ts : a.ts + (b.ts - a.ts) * (FULL_CAP - a.mid) / (b.mid - a.mid);
     }
     const hitTs = fc.hitQ && fc.pHit >= 0.5 && fc.hitQ[1] < t1 ? fc.hitQ[1] : cross !== null && cross < t1 ? cross : null;
     end = hitTs !== null
