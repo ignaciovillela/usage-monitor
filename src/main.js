@@ -322,6 +322,8 @@ async function noteVersionChange() {
   }
   refreshChrome(true); notifyPanel();
 }
+const STALE_DROP_MAX_MS = 15 * 60e3;
+let staleSince = 0;
 async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
   busy = true;
@@ -329,6 +331,14 @@ async function tick({ manual = false } = {}) {      // manual: «Actualizar ahor
   try {
     if (settings.source === "claude-code") watchFeed();
     const usage = await readUsage(now, manual);
+    // Lectura vieja (otra sesión de Claude Code reescribió su último porcentaje): se ignora y se conserva el último dato bueno.
+    // Si la caída se mantiene más de 15 min se acepta (el dato equivocado sería el guardado, no el nuevo).
+    const prev = persisted.state;
+    const stale = prev.status === "connected" && !usage.idle && Number.isFinite(usage.utilization) && Number.isFinite(prev.utilization)
+      && engine.isStaleDrop({ value: prev.utilization, resetsAt: prev.resetsAt }, { value: usage.utilization, resetsAt: usage.resetsAt });
+    if (!stale) staleSince = 0;
+    else if (!staleSince) staleSince = now;
+    if (stale && now - staleSince < STALE_DROP_MAX_MS) return;
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
     persisted.state.via = usage.via; persisted.state.fellBack = usage.fellBack;

@@ -53,8 +53,18 @@ function sameWindow(a, b) {
   return !Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) < RESET_SHIFT_MS;
 }
 // ¿Entre dos muestras consecutivas la ventana de 5 h se reinició?
+// Con la hora de reinicio conocida en ambas, una caída parcial (40 → 20) no es un reinicio sino una lectura vieja:
+// varias sesiones de Claude Code escriben el mismo archivo y una inactiva puede volver a escribir su último porcentaje.
+// Solo una caída hasta casi 0 sigue contando como reinicio (lo que se ve cuando se reinicia antes de tiempo).
 function isReset(prev, next) {
-  return next.value <= prev.value - RESET_DROP_PP || !sameWindow(prev.resetsAt, next.resetsAt);
+  if (!sameWindow(prev.resetsAt, next.resetsAt)) return true;
+  if (next.value > prev.value - RESET_DROP_PP) return false;
+  const known = Number.isFinite(prev.resetsAt) && Number.isFinite(next.resetsAt);
+  return !known || next.value <= RESET_DROP_PP;
+}
+// Lectura vieja: baja claramente dentro de la misma ventana sin ser un reinicio (el uso de una ventana no baja).
+function isStaleDrop(prev, next) {
+  return next.value <= prev.value - RESET_DROP_PP && !isReset(prev, next);
 }
 function currentWindowSamples(samples) {
   const out = [];
@@ -62,7 +72,9 @@ function currentWindowSamples(samples) {
     if (out.length && isReset(samples[i], out[0])) break;
     out.unshift(samples[i]);
   }
-  return out;
+  // Sin las lecturas viejas que quedaron guardadas: el gráfico y la estimación no las dibujan como caídas.
+  let top = -Infinity;
+  return out.filter(s => { const keep = !isStaleDrop({ value: top, resetsAt: s.resetsAt }, s); if (keep) top = Math.max(top, s.value); return keep; });
 }
 // 7 días de historial: resolución completa las últimas 6 h, una muestra cada 10 min antes.
 function compactSamples(samples, now) {

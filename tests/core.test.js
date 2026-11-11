@@ -13,6 +13,13 @@ test('motor lineal, formatos y consumo por hora', () => {
   assert(m.isReset(S(1, 90, R1), S(0, 2, R1)));
   assert(m.isReset(S(1, 50, R1), S(0, 52, R2)));
   assert(!m.isReset(S(1, 50, R1), S(0, 52, R1 + 5000)));
+  // lectura vieja (otra sesión reescribe su último %): caída parcial con la misma hora de reinicio no es reinicio
+  assert(!m.isReset(S(1, 40, R1), S(0, 20, R1)));
+  assert(m.isStaleDrop(S(1, 40, R1), S(0, 20, R1)));
+  assert(!m.isStaleDrop(S(1, 90, R1), S(0, 2, R1)));      // caída a casi 0: reinicio real
+  assert(m.isReset(S(1, 40), S(0, 20)));                   // sin hora de reinicio se mantiene la regla de la caída
+  const glitch = [S(6, 30, R1), S(5, 33, R1), S(4, 20, R1), S(3, 35, R1), S(2, 44, R1), S(1, 37, R1), S(0, 46, R1)];
+  assert.deepStrictEqual(m.currentWindowSamples(glitch).map(s => s.value), [30, 33, 35, 44, 46]);
   // ventana actual tras reset: estimador no ve caída
   const hist = [S(60, 90, R1), S(59, 92, R1), S(58, 94, R1), S(5, 1, R2), S(4, 2, R2), S(3, 3, R2), S(2, 4, R2), S(1, 5, R2)];
   assert.strictEqual(m.currentWindowSamples(hist).length, 5);
