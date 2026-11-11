@@ -309,6 +309,7 @@ function windowSpec() {
       }
 
       const show = (t, clientX, clientY) => {
+        if (end && end.prob && t > end.ts) return hide();   // la proyección terminó en el 100 %: después no hay nada que leer
         const v = valueAt(t);
         cross.setAttribute("x1", x(v.t)); cross.setAttribute("x2", x(v.t)); cross.setAttribute("visibility", "visible");
         hoverDot.setAttribute("cx", x(v.t)); hoverDot.setAttribute("cy", y(v.value)); hoverDot.setAttribute("visibility", "visible");
