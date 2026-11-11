@@ -310,14 +310,18 @@ function windowSpec() {
         }
       }
 
+      const fmtRange = (lo, hi) => Math.round(lo) === Math.round(hi) ? `${Math.round(hi)} %` : `${Math.round(lo)}–${Math.round(hi)} %`;
       const show = (t, clientX, clientY) => {
-        if (end && end.prob && t > end.ts) return hide();   // la proyección terminó en el 100 %: después no hay nada que leer
         const v = valueAt(t);
+        // Pasado el punto rojo la línea ya terminó en el 100 %: sin mediana ni punto, pero sí el rango y el ritmo parejo.
+        const pastEnd = end && end.prob && t > end.ts;
         cross.setAttribute("x1", x(v.t)); cross.setAttribute("x2", x(v.t)); cross.setAttribute("visibility", "visible");
-        hoverDot.setAttribute("cx", x(v.t)); hoverDot.setAttribute("cy", y(v.value)); hoverDot.setAttribute("visibility", "visible");
-        const rowsTip = v.kind === "band"
+        hoverDot.setAttribute("cx", x(v.t)); hoverDot.setAttribute("cy", y(v.value)); hoverDot.setAttribute("visibility", pastEnd ? "hidden" : "visible");
+        const rowsTip = pastEnd
+          ? (v.kind === "band" ? [{ key: "band-key", value: fmtRange(v.lo, v.hi), name: "Rango 80 %" }] : [])
+          : v.kind === "band"
           ? [{ key: "dashed", value: `~${fmtPct(v.value, 0)}`, name: "Mediana" },
-             { key: "band-key", value: `${Math.round(v.lo)}–${Math.round(v.hi)} %`, name: "Rango 80 %" }]
+             { key: "band-key", value: fmtRange(v.lo, v.hi), name: "Rango 80 %" }]
           : [v.kind === "actual"
             ? { key: "", value: fmtPct(v.value, 1), name: "Uso" }
             : { key: "dashed", value: `~${fmtPct(v.value, 1)}`, name: "Proyección" }];
