@@ -92,9 +92,19 @@
         <div class="row">
           <div class="row-text"><span class="row-title">Leer el uso desde</span><span id="source-hint" class="row-desc"></span></div>
           <select id="data-source">
-            <option value="claude-code">Claude Code</option>
+            <option value="auto">Automática</option>
+            <option value="oauth">Cuenta de Claude Code</option>
+            <option value="claude-code">Archivo de Claude Code</option>
             <option value="web">claude.ai</option>
             <option value="remote">Servidor propio</option>
+          </select>
+        </div>
+        <div id="priority-row" class="row" hidden>
+          <div class="row-text"><span class="row-title">Consultar primero</span><span class="row-desc">Si no responde, se usan las otras como respaldo</span></div>
+          <select id="data-priority">
+            <option value="oauth">Cuenta de Claude Code</option>
+            <option value="claude-code">Archivo de Claude Code</option>
+            <option value="web">claude.ai</option>
           </select>
         </div>
         <div id="cc-row" class="row" hidden>

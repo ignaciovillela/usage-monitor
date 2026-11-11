@@ -89,3 +89,12 @@ test('veredicto del ícono con ritmo lineal', () => {
   assert.strictEqual(m.projectionParts({status:'auth'}).headline,'Inicia sesión en Claude.ai');
   assert.strictEqual(m.projectionParts({status:'connected',utilization:5,rate:null,resetsAt:Date.now()+1e6,updatedAt:Date.now()}).headline,'Recopilando datos…');
 });
+
+test("esperando datos de Claude Code: aspecto neutro, sin «!» ni alarma", () => {
+  const core = require("../src/engine");
+  const state = { status: "error", waiting: true, error: "Todavía no llegan datos", updatedAt: Date.now() };
+  const info = core.badgeInfo(state, "pace", Date.now());
+  assert.equal(info.level, "idle");
+  assert.equal(info.text, "");
+  assert.equal(core.badgeInfo({ status: "error", error: "x" }, "pace", Date.now()).text, "!");   // un error real sí avisa
+});

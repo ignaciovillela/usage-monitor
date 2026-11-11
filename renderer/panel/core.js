@@ -194,6 +194,7 @@ function blockedMinutes(state, proj) {
 }
 // El nivel es el veredicto de la proyección: ok (llegas con margen), warn (justo), danger (te quedas sin límite).
 function levelFor(state, proj, now = Date.now()) {
+  if (state && state.status === "error" && state.waiting) return "idle";   // esperando datos de Claude Code: aspecto neutro, no de alarma
   if (!state || state.status === "auth" || state.status === "error") return "error";
   if (state.idle) return "idle";
   if (!Number.isFinite(state.utilization)) return "error";
@@ -236,6 +237,7 @@ function fmtShort(mins) {
 function projectionParts(state, now = Date.now()) {
   if (!state || !state.status || state.status === "idle") return { level: "unknown", icon: "…", headline: "Consultando…", detail: "" };
   if (state.status === "auth") return { level: "error", icon: "!", headline: "Inicia sesión en Claude.ai", detail: "Abre claude.ai y vuelve a intentarlo." };
+  if (state.status === "error" && state.waiting) return { level: "idle", icon: "–", headline: "Esperando datos de Claude Code", detail: state.error || "" };
   if (state.status === "error") return { level: "error", icon: "!", headline: "Uso no disponible", detail: state.error || "No se pudo consultar el uso." };
   const v = verdict(state, now);
   const p = projection(state, now);
@@ -294,7 +296,7 @@ function badgeInfo(state, mode, now = Date.now()) {
   const proj = projection(state, now);
   const level = levelFor(state, proj, now);
   if (level === "error") return { level, text: state && state.status === "auth" ? "?" : "!" };
-  if (state.idle) return { level, text: "" }; // sin ventana activa: sin badge (el anillo del ícono queda en gris)
+  if (state.idle || state.waiting) return { level, text: "" }; // sin ventana activa: sin badge (el anillo del ícono queda en gris)
   let text = String(Math.round(state.utilization));
   if (mode === "prob" && proj.prob) {
     text = `${Math.round(proj.pHit * 100)}%`;

@@ -9,6 +9,8 @@ const claudeCode = require("./providers/claude-code");
 const remote = require("./providers/remote");
 const updates = require("./updates");
 const selfupdate = require("./selfupdate");
+const claudeOauth = require("./providers/claude-oauth");
+const { pickUsage } = require("./pick-usage");
 const store = require("./store");
 const importer = require("./importer");
 
@@ -123,22 +125,32 @@ async function setRemote({ url, urlOnline, token, clearToken } = {}) {
   const s = persisted.state;
   return s.status === "connected" ? { ok: true } : { ok: false, error: s.error || "Sin datos todavía." };
 }
+// Fuentes en el orden en que se consultan: una sola, o las dos según la prioridad elegida («auto»).
+// «auto» consulta primero la elegida y luego las demás; claude.ai (ventana con login) solo entra si es la prioritaria.
+const AUTO_FALLBACK = ["oauth", "claude-code"];
+const sourceOrder = () => settings.source !== "auto" ? [settings.source] : [settings.priority, ...AUTO_FALLBACK.filter(v => v !== settings.priority)];
+const SOURCE_NAMES = { web: "claude.ai", "claude-code": "Claude Code (archivo)", oauth: "Claude Code (cuenta)", remote: "Servidor propio" };
 
 // ── Ciclo de consulta ───────────────────────────────────────────────────────
+// Devuelve el uso con `via` (qué fuente respondió) y `fellBack` (respondió una de respaldo). Si todas fallan se informa el error de claude.ai, que es el accionable.
 async function readUsage(now, manual) {
   if (MOCK) return MOCK.next();
-  if (settings.source === "claude-code") return claudeCode.readFeed(claudeCode.feedFile(), now);
-  if (settings.source === "remote") {
-    try {
-      const r = await remote.fetchRemote(remoteUrls(), remoteToken(), now, { refresh: manual });
-      setRemoteInfo({ version: r.version, via: r.via });
-      return r.usage;
-    } catch (e) {
-      if (e.serverVersion !== undefined) setRemoteInfo({ version: e.serverVersion, via: e.via });   // respondió aunque fuera con error
-      throw e;
-    }
+  return pickUsage(sourceOrder(), {
+    web: fetchUsageViaPage,
+    oauth: () => claudeOauth.readUsage(),
+    "claude-code": () => claudeCode.readFeed(claudeCode.feedFile(), now),
+    remote: () => readRemote(now, manual)
+  });
+}
+async function readRemote(now, manual) {
+  try {
+    const r = await remote.fetchRemote(remoteUrls(), remoteToken(), now, { refresh: manual });
+    setRemoteInfo({ version: r.version, via: r.via });
+    return r.usage;
+  } catch (e) {
+    if (e.serverVersion !== undefined) setRemoteInfo({ version: e.serverVersion, via: e.via });   // respondió aunque fuera con error
+    throw e;
   }
-  return fetchUsageViaPage();
 }
 function setRemoteInfo(info) {
   const changed = !remoteInfo || remoteInfo.version !== info.version;
@@ -319,15 +331,16 @@ async function tick({ manual = false } = {}) {      // manual: «Actualizar ahor
     const usage = await readUsage(now, manual);
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
+    persisted.state.via = usage.via; persisted.state.fellBack = usage.fellBack;
     if (loginShown && win && win.isVisible()) win.hide();      // ya hay datos: la ventana de inicio de sesión se oculta sola
     errors = 0; loginShown = false;
     if (settings.alerts) res.events.forEach(notify);
     saveSoon();
   } catch (e) {
     if (e.kind !== "nofeed" && e.kind !== "config") errors++;      // esperar datos de Claude Code o la URL del servidor no es un fallo: no se espacian los intentos
-    persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", error: e.message || String(e), updatedAt: now };
-    // Sin sesión, o dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
-    if (settings.source === "web" && (e.kind === "auth" || errors >= 2) && !loginShown) { loginShown = true; showLogin(); }
+    persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", waiting: e.kind === "nofeed", error: e.message || String(e), updatedAt: now };
+    // Sin sesión (cualquier modo con claude.ai) o, solo en «solo claude.ai», dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
+    if (((settings.source === "web" && errors >= 2) || (sourceOrder().includes("web") && e.kind === "auth")) && !loginShown) { loginShown = true; showLogin(); }
   } finally {
     busy = false;
     await render(true);
@@ -413,6 +426,7 @@ function statusLines() {
   const s = currentState(), now = Date.now(), lines = [];
   if (s.status === "connected") {
     const parts = engine.projectionParts(s, now);
+    lines.push(`Fuente: ${SOURCE_NAMES[s.via] || "claude.ai"}${s.fellBack ? ` (respaldo: ${SOURCE_NAMES[sourceOrder()[0]]} no respondió)` : ""}`);
     lines.push(`Uso ${engine.fmtPct(s.utilization)}${Number.isFinite(s.resetsAt) ? ` · reinicio ${engine.fmtClock(s.resetsAt)} (en ${engine.fmtReset(s.resetsAt)})` : ""}`);
     lines.push(`${parts.icon} ${parts.headline}`);
     if (parts.detail) lines.push(parts.detail);
@@ -429,11 +443,11 @@ function updateSetting(key, value) {
   if (key === "pollSeconds") schedule();
   if (key === "updateCheck") { if (value) checkUpdates(); else refreshAdvice(); }
   if (key === "updateChannel") { latest = null; refreshAdvice(); checkUpdates(); }   // lo del canal anterior ya no vale
-  if (key === "source") {
+  if (key === "source" || key === "priority") {
     errors = 0; loginShown = false;
-    if (value === "web" && !win) createSessionWindow();
-    if (value === "remote" && !remoteUrl()) showPanel("settings");      // los campos de URL y token están en Ajustes
-    if (value !== "remote") refreshAdvice();                   // sin servidor propio no hay aviso sobre su versión
+    if (sourceOrder().includes("web") && !win) createSessionWindow();
+    if (key === "source" && value === "remote" && !remoteUrl()) showPanel("settings");      // los campos de URL y token están en Ajustes
+    if (key === "source" && value !== "remote") refreshAdvice();                   // sin servidor propio no hay aviso sobre su versión
     tick();
   }
   render(true); refreshChrome(true);
@@ -514,7 +528,7 @@ function storageSnapshot() {
     usageState: currentState(), usageSamples: panelSamples(),
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
-    appVersion: app.getVersion(), dataSource: settings.source, claudeCodeConnected: claudeCode.isConnected(),
+    appVersion: app.getVersion(), dataSource: settings.source, dataPriority: settings.priority, claudeCodeConnected: claudeCode.isConnected(),
     remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
     serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
     updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
@@ -535,6 +549,7 @@ ipcMain.handle("storage-get", (_e, keys) => {
 ipcMain.handle("storage-set", (_e, obj) => {
   for (const [k, v] of Object.entries(obj || {})) {
     if (k === "pollSeconds" && ![10, 20, 30, 60].includes(v)) continue;
+    if (k === "dataPriority") { if (["oauth", "claude-code", "web"].includes(v)) updateSetting("priority", v); continue; }
     if (k === "openAtLogin") { app.setLoginItemSettings({ openAtLogin: !!v }); refreshChrome(true); continue; }
     if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v);
   }
@@ -547,7 +562,7 @@ ipcMain.handle("runtime-message", async (_e, message) => {
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
   if (message && message.type === "DISCONNECT_CLAUDE_CODE") { await disconnectClaudeCode(); return { ok: true }; }
   if (message && message.type === "OPEN_LOGIN_WINDOW") { if (!win) createSessionWindow(); showLogin(); return { ok: true }; }
-  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote", "oauth", "auto"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
   if (message && message.type === "SET_REMOTE") return setRemote(message);
   // Solo se copia un token generado en el panel (nada arbitrario al portapapeles).
   if (message && message.type === "COPY_TOKEN_LINE" && /^[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
@@ -723,8 +738,8 @@ app.whenReady().then(async () => {
   refreshChrome(true);
   if (MOCK || settings.source !== "web") tick();     // claude.ai espera a que cargue su ventana
   // Primera vez con Claude Code como fuente y sin conectar: se ofrece conectarlo una sola vez.
-  if (!MOCK && settings.source === "claude-code" && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
-  if (!MOCK && settings.source === "web") createSessionWindow();
+  if (!MOCK && sourceOrder().includes("claude-code") && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
+  if (!MOCK && sourceOrder().includes("web")) createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
   setTimeout(checkUpdates, 10000); setInterval(checkUpdates, UPDATE_CHECK_MS);
   afterUpdateStartup(); noteVersionChange(); refreshUpdaterCopy();

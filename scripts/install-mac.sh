@@ -76,4 +76,4 @@ rm -rf "${INSTALL_DIR:?}/$APP"
 mv "$NEW" "$INSTALL_DIR/$APP" || fail "No se pudo reemplazar $INSTALL_DIR/$APP."
 echo "Instalado en $INSTALL_DIR/$APP"
 
-if [ "${OPEN:-1}" = "1" ]; then open "$INSTALL_DIR/$APP"; echo "Abriendo Usage Monitor…"; fi
+if [ "${OPEN:-1}" = "1" ]; then open "$INSTALL_DIR/$APP"; echo "Abriendo Usage Monitor… el panel te ayudará a conectarlo con Claude Code."; fi

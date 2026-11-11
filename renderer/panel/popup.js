@@ -74,13 +74,15 @@ function showTip(clientX, clientY, title, rows) {
 const hideTip = () => { tip.hidden = true; };
 
 // ── Resumen ─────────────────────────────────────────────────────────────────
+// Nombre de la fuente que respondió (state.via), para el encabezado.
+const VIA_NAMES = { "claude-code": "Claude Code (archivo)", oauth: "Claude Code (cuenta)", web: "Claude.ai" };
 function renderSummary() {
   const now = model.now;
   const connected = model.state.status === "connected";
   // Sin conexión no se muestran cifras viejas como si fueran actuales.
   const s = connected ? model.state : { status: model.state.status, error: model.state.error };
   $("status").textContent =
-    connected ? `Conectada a ${ui.source || "Claude.ai"} · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
+    connected ? `Conectada a ${VIA_NAMES[s.via] || ui.source || "Claude.ai"}${s.fellBack ? " (respaldo)" : ""} · ${new Date(s.updatedAt).toLocaleTimeString(LOCALE)}` :
     s.status === "auth" ? "Sesión no disponible" :
     s.status === "error" ? "Error de conexión" : "Consultando…";
 
@@ -498,7 +500,7 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "dataPriority", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
@@ -533,16 +535,19 @@ function pollNow() {
 
 // Fuente de datos. El servidor propio se guarda con su botón (no al teclear) y la URL no se pisa mientras se edita.
 const SOURCE_HINTS = {
-  "claude-code": "Los límites que calcula Claude Code (planes Pro y Max). Sin cookies.",
+  auto: "Consulta primero la que elijas abajo y, si no responde, las demás. Sin perder el último dato.",
+  oauth: "Tu cuenta de Claude Code en este equipo, sin login ni línea de estado.",
+  "claude-code": "Los límites que calcula Claude Code (planes Pro y Max) vía la línea de estado. Sin cookies.",
   web: "Tu sesión de claude.ai en una ventana de la app. Trae todos los topes semanales.",
   remote: "Un servidor tuyo que consulta el uso; la app solo lo muestra."
 };
-function showSource(source) {
+function showSource(source, priority = $("data-priority").value) {
   $("data-source").value = source;
   $("source-hint").textContent = SOURCE_HINTS[source] || "";
+  $("priority-row").hidden = source !== "auto";
   $("remote-fields").hidden = source !== "remote";
-  $("cc-row").hidden = source !== "claude-code";
-  $("web-row").hidden = source !== "web";
+  $("cc-row").hidden = source !== "claude-code" && source !== "auto";      // en «auto» el archivo siempre es uno de los respaldos
+  $("web-row").hidden = source !== "web" && !(source === "auto" && priority === "web");
 }
 function setStatus(text, state) { $("remote-status").textContent = text; $("remote-status").dataset.state = state || ""; }
 function renderSource(data) {
@@ -553,6 +558,7 @@ function renderSource(data) {
   $("cc-btn").className = ui.ccConnected ? "text-btn" : "text-btn primary";
   $("poll-seconds").value = String([10, 20, 30, 60].includes(data.pollSeconds) ? data.pollSeconds : 20);
   $("open-at-login").checked = !!data.openAtLogin;
+  $("data-priority").value = ["oauth", "claude-code", "web"].includes(data.dataPriority) ? data.dataPriority : "oauth";
   showSource(source);
   for (const [id, key] of [["remote-url", "remoteUrl"], ["remote-url-online", "remoteUrlOnline"]]) {
     if (document.activeElement !== $(id)) $(id).value = data[key] || "";
@@ -569,6 +575,10 @@ $("data-source").addEventListener("change", e => {
   // Sin URL guardada, elegir «Servidor propio» solo muestra los campos; se activa al pulsar «Guardar y probar».
   if (value === "remote" && !$("remote-url").value && !$("remote-url-online").value) { $("remote-url").focus(); return; }
   chrome.runtime.sendMessage({ type: "SET_SOURCE", value }, () => { void chrome.runtime.lastError; load(); });
+});
+$("data-priority").addEventListener("change", e => {
+  showSource($("data-source").value, e.target.value);
+  chrome.storage.local.set({ dataPriority: e.target.value }).then(load);
 });
 function saveRemote(extra = {}) {
   setStatus("Probando…");
