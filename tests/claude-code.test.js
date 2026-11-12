@@ -45,7 +45,9 @@ test("el uso se limita a 0-100", () => {
   assert.equal(u.utilization, 100);
 });
 
-test("el script guarda rate_limits, reenvía al comando original y no pisa con entradas sin límites", () => {
+// El script es de shell: sin `sh` en el PATH (p. ej. Windows fuera de Git Bash) no se puede ejecutar.
+const hasSh = (() => { try { execFileSync("sh", ["-c", "exit 0"], { stdio: "ignore" }); return true; } catch (_) { return false; } })();
+test("el script guarda rate_limits, reenvía al comando original y no pisa con entradas sin límites", { skip: !hasSh && "no hay sh en el PATH" }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "um-script-"));
   const script = path.join(dir, "feed.sh"), feed = path.join(dir, "feed.json");
   fs.writeFileSync(script, FEED_SCRIPT, { mode: 0o700 });
@@ -59,7 +61,8 @@ test("el script guarda rate_limits, reenvía al comando original y no pisa con e
   assert.equal(JSON.parse(saved).rate_limits.five_hour.used_percentage, 7);
   run(JSON.stringify({ cwd: "/otro" }));
   assert.equal(fs.readFileSync(feed, "utf8"), saved, "una entrada sin rate_limits no sobrescribe");
-  assert.equal(fs.statSync(feed).mode & 0o777, 0o600);
+  // Windows no tiene bits de permiso POSIX (Node siempre informa 0666): ahí no hay nada que comprobar.
+  if (process.platform !== "win32") assert.equal(fs.statSync(feed).mode & 0o777, 0o600);
 });
 
 // ── Conexión con ~/.claude/settings.json (siempre en carpetas temporales) ──

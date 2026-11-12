@@ -1,11 +1,14 @@
 // Usage Monitor: ícono dinámico del Dock con el uso de Claude y su proyección hasta el reinicio.
 // Lee el uso con tu propia sesión de claude.ai, iniciada en una ventana de la app (sin extensión ni navegador).
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, session, ipcMain, dialog, screen, safeStorage, shell, clipboard } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const engine = require("./engine");
 const { parseUsage, pageScript } = require("./providers/claude");
 const claudeCode = require("./providers/claude-code");
+const remote = require("./providers/remote");
+const updates = require("./updates");
+const selfupdate = require("./selfupdate");
 const claudeOauth = require("./providers/claude-oauth");
 const { pickUsage } = require("./pick-usage");
 const store = require("./store");
@@ -18,7 +21,8 @@ const ICON_REFRESH_MS = 5000;           // el ícono se redibuja cada pocos segu
 const PAGE_RELOAD_MS = 3 * 60 * 60 * 1000;
 
 app.setName("Usage Monitor");
-if (process.platform === "win32") app.setAppUserModelId("io.github.ignaciovillela.usage-monitor");   // necesario para las notificaciones de Windows
+const APP_ID = "io.github.ignaciovillela.usage-monitor";
+if (process.platform === "win32") app.setAppUserModelId(APP_ID);   // necesario para las notificaciones de Windows
 if (process.env.USAGE_MONITOR_DATA) app.setPath("userData", process.env.USAGE_MONITOR_DATA);   // para pruebas: otra instancia, otros datos
 // Instalación anterior (cuando la app se llamaba "Claude Usage"): se copian historial y ajustes una sola vez.
 // La sesión de claude.ai no se copia: hay que iniciarla de nuevo.
@@ -87,22 +91,254 @@ async function fetchUsageViaPage() {
   return parseUsage(result.data);
 }
 
+// ── Servidor propio: URL y token (el token se cifra con el llavero del sistema si está disponible) ─────────
+// Dos URLs: la local (red de casa) y una online opcional de respaldo; basta con una de las dos.
+// USAGE_MONITOR_REMOTE_URL, USAGE_MONITOR_REMOTE_URL_ONLINE y USAGE_MONITOR_REMOTE_TOKEN tienen prioridad sobre los ajustes.
+const remoteFromEnv = () => !!(process.env.USAGE_MONITOR_REMOTE_URL || process.env.USAGE_MONITOR_REMOTE_URL_ONLINE);
+const remoteUrls = () => remoteFromEnv()
+  ? { local: process.env.USAGE_MONITOR_REMOTE_URL || "", online: process.env.USAGE_MONITOR_REMOTE_URL_ONLINE || "" }
+  : { local: settings.remoteUrl || "", online: settings.remoteUrlOnline || "" };
+const remoteUrl = () => { const u = remoteUrls(); return u.local || u.online; };
+let remoteInfo = null;      // { version, via } de la última respuesta del servidor propio
+function remoteToken() {
+  if (process.env.USAGE_MONITOR_REMOTE_TOKEN) return process.env.USAGE_MONITOR_REMOTE_TOKEN;
+  const t = settings.remoteToken || "";
+  if (!t.startsWith("enc:")) return t;
+  try { return safeStorage.decryptString(Buffer.from(t.slice(4), "base64")); } catch (_) { return ""; }
+}
+const sealToken = t => !t ? "" : safeStorage.isEncryptionAvailable() ? "enc:" + safeStorage.encryptString(t).toString("base64") : t;
+// Desde el panel: guarda URL y token (token vacío = se mantiene el actual) y pasa a esta fuente con una consulta inmediata.
+async function setRemote({ url, urlOnline, token, clearToken } = {}) {
+  const next = { ...settings };
+  if (!remoteFromEnv()) {
+    url = String(url || "").trim(); urlOnline = String(urlOnline || "").trim();
+    if (!url && !urlOnline) return { ok: false, error: "Escribe la URL local, la online o ambas." };
+    for (const u of [url, urlOnline]) if (u && !remote.validUrl(u)) return { ok: false, error: `«${u}» no es válida: debe empezar por http:// o https://.` };
+    Object.assign(next, { remoteUrl: url, remoteUrlOnline: urlOnline });
+  }
+  if (clearToken) next.remoteToken = "";
+  else if (token) next.remoteToken = sealToken(String(token).trim());
+  settings = { ...next, source: "remote" };
+  store.saveSettings(settings);
+  errors = 0; loginShown = false;
+  await tick({ manual: true });
+  const s = persisted.state;
+  return s.status === "connected" ? { ok: true } : { ok: false, error: s.error || "Sin datos todavía." };
+}
 // Fuentes en el orden en que se consultan: una sola, o las dos según la prioridad elegida («auto»).
 // «auto» consulta primero la elegida y luego las demás; claude.ai (ventana con login) solo entra si es la prioritaria.
 const AUTO_FALLBACK = ["oauth", "claude-code"];
 const sourceOrder = () => settings.source !== "auto" ? [settings.source] : [settings.priority, ...AUTO_FALLBACK.filter(v => v !== settings.priority)];
-const SOURCE_NAMES = { web: "claude.ai", "claude-code": "Claude Code (archivo)", oauth: "Claude Code (cuenta)" };
-// Devuelve el uso con `via` (qué fuente respondió) y `fellBack` (respondió una de respaldo). Si todas fallan se informa el error de claude.ai, que es el accionable.
-const readUsage = now => pickUsage(sourceOrder(), { web: fetchUsageViaPage, oauth: () => claudeOauth.readUsage(), "claude-code": () => claudeCode.readFeed(claudeCode.feedFile(), now) });
+const SOURCE_NAMES = { web: "claude.ai", "claude-code": "Claude Code (archivo)", oauth: "Claude Code (cuenta)", remote: "Servidor propio" };
 
 // ── Ciclo de consulta ───────────────────────────────────────────────────────
-async function tick() {
+// Devuelve el uso con `via` (qué fuente respondió) y `fellBack` (respondió una de respaldo). Si todas fallan se informa el error de claude.ai, que es el accionable.
+async function readUsage(now, manual) {
+  if (MOCK) return MOCK.next();
+  return pickUsage(sourceOrder(), {
+    web: fetchUsageViaPage,
+    oauth: () => claudeOauth.readUsage(),
+    "claude-code": () => claudeCode.readFeed(claudeCode.feedFile(), now),
+    remote: () => readRemote(now, manual)
+  });
+}
+async function readRemote(now, manual) {
+  try {
+    const r = await remote.fetchRemote(remoteUrls(), remoteToken(), now, { refresh: manual });
+    setRemoteInfo({ version: r.version, via: r.via });
+    return r.usage;
+  } catch (e) {
+    if (e.serverVersion !== undefined) setRemoteInfo({ version: e.serverVersion, via: e.via });   // respondió aunque fuera con error
+    throw e;
+  }
+}
+function setRemoteInfo(info) {
+  const changed = !remoteInfo || remoteInfo.version !== info.version;
+  remoteInfo = info;
+  if (changed) refreshAdvice();
+}
+
+// ── Versiones y actualizaciones ─────────────────────────────────────────────
+// Cada 6 h se consulta la lista de releases (se puede desactivar en el panel); los avisos comparan la app,
+// el servidor propio (si se usa y dice su versión) y el último release. Cada versión nueva se notifica una sola vez.
+const UPDATE_CHECK_MS = 6 * 3600e3;
+const releases = updates.repoUrls(require("../package.json"));
+let latest = null, updateAdvice = [];
+const updateChannel = () => updates.effectiveChannel(settings.updateChannel, app.getVersion());
+async function checkUpdates() {
+  if (!settings.updateCheck || !releases.api || MOCK) return;
+  const channel = updateChannel();
+  let found;
+  try { found = await updates.fetchLatest(releases.api, app.getVersion(), channel); }
+  catch (e) { console.error("no se pudo consultar las versiones:", e.message); return; }
+  if (channel !== updateChannel()) return;      // se cambió de canal mientras tanto: vale la consulta nueva
+  latest = found;
+  refreshAdvice();
+}
+function refreshAdvice() {
+  const serverVersion = settings.source === "remote" && remoteInfo ? remoteInfo.version : null;
+  updateAdvice = updates.advice({ appVersion: app.getVersion(), serverVersion, latest: settings.updateCheck ? latest : null, releasesPage: releases.page, channel: updateChannel() });
+  for (const a of updateAdvice) {
+    const key = `${a.kind}@${a.version}`;
+    if ((settings.notifiedUpdates || []).includes(key)) continue;
+    saveFlag("notifiedUpdates", [...(settings.notifiedUpdates || []), key].slice(-10));
+    if (settings.alerts && Notification.isSupported()) {
+      const n = new Notification({ title: a.kind === "server" ? "Usage Monitor: actualiza el servidor" : "Usage Monitor: actualización disponible", body: a.text });
+      if (a.url) n.on("click", () => openRelease(a.url));
+      n.show();
+    }
+  }
+  refreshChrome(true); notifyPanel();
+}
+// Solo se abren las páginas de releases conocidas (las de los avisos, la del resumen o la del repositorio).
+function openRelease(url) {
+  const known = url === releases.page || url === releases.repo || updateAdvice.some(a => a.url === url) || (settings.updateSummary && settings.updateSummary.url === url);
+  if (url && known && /^https:\/\//.test(url)) shell.openExternal(url);
+}
+
+// ── Actualizar con un botón ─────────────────────────────────────────────────
+// La app descarga el instalador del release (con barra de progreso y comprobación sha256) y se lo pasa al script de
+// su sistema, que viene dentro de la app: scripts/install-win.ps1 (zip) o scripts/install-mac.sh (dmg). La app se
+// cierra; el script espera a que termine, reemplaza la app, la vuelve a abrir y, si algo falla, reabre la anterior y
+// deja el error en «last-update-error.txt», que se muestra en el panel al arrancar.
+const exeDir = () => path.dirname(process.execPath);
+const scriptInstalled = () => process.platform === "win32" && fs.existsSync(path.join(exeDir(), ".release-tag"));
+const updateErrorFile = () => path.join(app.getPath("userData"), "last-update-error.txt");
+const writable = dir => { try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch (_) { return false; } };
+// Dónde se instala, o null si desde aquí no se puede (desarrollo, Mac Intel, carpeta sin permiso de escritura…).
+function selfUpdateTarget() {
+  if (!app.isPackaged || MOCK || process.env.USAGE_MONITOR_DATA) return null;
+  if (process.platform === "win32" && process.arch === "x64") {
+    // Instalada por el script: se reemplaza en su sitio. Abierta desde un zip: se instala donde lo hace el script.
+    return { os: "win", dir: scriptInstalled() ? exeDir() : path.join(process.env.LOCALAPPDATA || "", "Programs", "Usage Monitor") };
+  }
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    const bundle = path.resolve(process.execPath, "..", "..", "..");      // …/Usage Monitor.app/Contents/MacOS/Usage Monitor
+    const dir = path.basename(bundle) === "Usage Monitor.app" && writable(path.dirname(bundle)) ? path.dirname(bundle) : "/Applications";
+    return writable(dir) ? { os: "mac", dir, bundle } : null;
+  }
+  return null;
+}
+const updateAsset = () => latest && selfupdate.pickAsset(latest.assets);
+const canSelfInstall = () => !!selfUpdateTarget() && !!updateAsset();
+const bundledScript = name => fs.readFileSync(path.join(__dirname, "..", "scripts", name));
+// La tarea de actualización automática de Windows ejecuta una copia local del instalador: se mantiene igual a la de esta versión.
+function refreshUpdaterCopy() {
+  if (!scriptInstalled()) return;
+  const copy = path.join(process.env.LOCALAPPDATA || "", "Usage Monitor Updater", "install-win.ps1");
+  try { if (fs.existsSync(copy)) fs.writeFileSync(copy, bundledScript("install-win.ps1")); } catch (e) { console.error("no se pudo actualizar el instalador local:", e.message); }
+}
+
+// Estado de la actualización en curso: { phase: "download" | "install" | "error", version, received, total, error }.
+let updateJob = null;
+const publicJob = () => updateJob && { phase: updateJob.phase, version: updateJob.version, received: updateJob.received || 0, total: updateJob.total || 0, error: updateJob.error || null };
+function pushProgress(phaseChanged) {
+  const j = publicJob();
+  if (panelWin && !panelWin.isDestroyed()) {
+    panelWin.webContents.send("storage-changed", { updateProgress: { newValue: j } });
+    // Barra también en el ícono de la barra de tareas (Windows) o del Dock (macOS) mientras el panel está abierto.
+    panelWin.setProgressBar(j && j.phase === "download" && j.total ? j.received / j.total : j && j.phase === "install" ? 2 : -1);
+  }
+  if (phaseChanged) refreshChrome(true);
+}
+async function installUpdate() {
+  if (updateJob && updateJob.phase !== "error") return;      // ya hay una en curso
+  const target = selfUpdateTarget(), asset = updateAsset();
+  if (!target || !asset) { if (latest && latest.url) openRelease(latest.url); return; }
+  const version = latest.version, controller = new AbortController();
+  updateJob = { phase: "download", version, received: 0, total: asset.size, controller };
+  pushProgress(true);
+  const file = path.join(app.getPath("temp"), `usage-monitor-update-${process.pid}-${asset.name}`);
+  try {
+    await selfupdate.download(asset, file, {
+      signal: controller.signal, userAgent: `usage-monitor/${app.getVersion()}`,
+      onProgress: (received, total) => { updateJob.received = received; updateJob.total = total; pushProgress(false); }
+    });
+  } catch (e) {
+    updateJob = controller.signal.aborted ? null : { phase: "error", version, error: e.message || String(e) };
+    pushProgress(true);
+    return;
+  }
+  updateJob = { ...updateJob, phase: "install", controller: null };
+  pushProgress(true);
+  try {
+    launchInstaller(target, file, version);
+  } catch (e) {
+    fs.rmSync(file, { force: true });
+    updateJob = { phase: "error", version, error: `No se pudo iniciar el instalador: ${e.message}` };
+    pushProgress(true);
+    return;
+  }
+  // Windows registra el inicio automático con la ruta del .exe: la versión nueva lo vuelve a registrar con la suya.
+  if (process.platform === "win32" && app.getLoginItemSettings().openAtLogin) saveFlag("reapplyLogin", true);
+  setTimeout(() => app.quit(), 1200);      // el script espera a que este proceso termine
+}
+function cancelUpdate() { if (updateJob && updateJob.controller) updateJob.controller.abort(); }
+function launchInstaller(target, file, version) {
+  const { spawn } = require("child_process");
+  const opts = { detached: true, stdio: "ignore", windowsHide: true };
+  fs.rmSync(updateErrorFile(), { force: true });
+  if (target.os === "win") {
+    const script = path.join(app.getPath("userData"), "install-win.ps1");
+    fs.writeFileSync(script, bundledScript("install-win.ps1"));
+    spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-Quiet", "-ZipPath", file, "-Tag", `v${version}`, "-InstallDir", target.dir,
+      "-WaitPid", String(process.pid), "-Relaunch", process.execPath, "-ErrorLog", updateErrorFile()], opts).unref();
+  } else {
+    const script = path.join(app.getPath("userData"), "install-mac.sh");
+    fs.writeFileSync(script, bundledScript("install-mac.sh"));
+    spawn("/bin/bash", [script], { ...opts, env: { ...process.env, DMG: file, INSTALL_DIR: target.dir, WAIT_PID: String(process.pid),
+      RELAUNCH: target.bundle, ERROR_LOG: updateErrorFile(), OPEN: "1" } }).unref();
+  }
+}
+// Al arrancar: error de la última actualización (si la hubo) y el inicio automático tras cambiar de carpeta.
+function afterUpdateStartup() {
+  try {
+    const f = updateErrorFile();
+    if (fs.existsSync(f)) {
+      updateJob = { phase: "error", version: null, error: fs.readFileSync(f, "utf8").trim().slice(0, 500) || "La actualización falló." };
+      fs.rmSync(f, { force: true });
+    }
+  } catch (e) { console.error("no se pudo leer el error de la actualización:", e.message); }
+  if (settings.reapplyLogin) { app.setLoginItemSettings({ openAtLogin: true }); saveFlag("reapplyLogin", false); }
+}
+
+// Resumen de la actualización: al arrancar con otra versión que la última vez, se arma la lista de cambios (notas
+// de los releases y commits entre ambas) y se muestra en el panel hasta que la cierres.
+async function noteVersionChange() {
+  const ver = app.getVersion(), prev = settings.lastVersion;
+  if (prev === ver || MOCK) return;
+  saveFlag("lastVersion", ver);
+  if (!prev) return;      // primera vez: no hay «desde»
+  let summary = { from: prev, to: ver, downgrade: updates.compareVersions(ver, prev) < 0, items: [], more: 0, url: releases.page };
+  if (settings.updateCheck) {
+    try { summary = await updates.fetchSummary(releases, prev, ver, ver); } catch (e) { console.error("no se pudo armar el resumen:", e.message); }
+  }
+  saveFlag("updateSummary", { ...summary, at: Date.now() });
+  if (settings.alerts && Notification.isSupported()) {
+    const n = new Notification({ title: `Usage Monitor actualizado a v${summary.to}`, body: summary.items[0] ? `${summary.items[0]}${summary.items.length > 1 ? ` (y ${summary.items.length - 1 + summary.more} más)` : ""}` : "Abre el panel para ver las novedades." });
+    n.on("click", showPanel);
+    n.show();
+  }
+  refreshChrome(true); notifyPanel();
+}
+const STALE_DROP_MAX_MS = 15 * 60e3;
+let staleSince = 0;
+async function tick({ manual = false } = {}) {      // manual: «Actualizar ahora» o la flecha del panel
   if (busy) return;
   busy = true;
   const now = Date.now();
   try {
     if (settings.source === "claude-code") watchFeed();
-    const usage = MOCK ? MOCK.next() : await readUsage(now);
+    const usage = await readUsage(now, manual);
+    // Lectura vieja (otra sesión de Claude Code reescribió su último porcentaje): se ignora y se conserva el último dato bueno.
+    // Si la caída se mantiene más de 15 min se acepta (el dato equivocado sería el guardado, no el nuevo).
+    const prev = persisted.state;
+    const stale = prev.status === "connected" && !usage.idle && Number.isFinite(usage.utilization) && Number.isFinite(prev.utilization)
+      && engine.isStaleDrop({ value: prev.utilization, resetsAt: prev.resetsAt }, { value: usage.utilization, resetsAt: usage.resetsAt });
+    if (!stale) staleSince = 0;
+    else if (!staleSince) staleSince = now;
+    if (stale && now - staleSince < STALE_DROP_MAX_MS) return;
     const res = engine.step(persisted, usage, now, { engine: "prob" });
     persisted = res.persisted;
     persisted.state.via = usage.via; persisted.state.fellBack = usage.fellBack;
@@ -111,7 +347,7 @@ async function tick() {
     if (settings.alerts) res.events.forEach(notify);
     saveSoon();
   } catch (e) {
-    if (e.kind !== "nofeed") errors++;      // esperar datos de Claude Code no es un fallo: es una lectura local barata, sin espaciar los intentos
+    if (e.kind !== "nofeed" && e.kind !== "config") errors++;      // esperar datos de Claude Code o la URL del servidor no es un fallo: no se espacian los intentos
     persisted.state = { ...persisted.state, status: e.kind === "auth" ? "auth" : "error", waiting: e.kind === "nofeed", error: e.message || String(e), updatedAt: now };
     // Sin sesión (cualquier modo con claude.ai) o, solo en «solo claude.ai», dos fallos seguidos: se muestra la ventana de claude.ai para iniciar sesión o completar una verificación.
     if (((settings.source === "web" && errors >= 2) || (sourceOrder().includes("web") && e.kind === "auth")) && !loginShown) { loginShown = true; showLogin(); }
@@ -185,6 +421,16 @@ function render(force) {
   return renderChain;
 }
 
+// Windows: las ventanas usan su propio identificador de app. Al mostrar una notificación, Electron crea en el menú
+// Inicio un acceso directo con el identificador de la app, y la barra de tareas pasaría a mostrar el ícono fijo de ese
+// acceso directo en vez del ícono dinámico de la ventana.
+const WINDOW_APP_ID = APP_ID + ".window";
+function setupTaskbar(w) {
+  if (process.platform !== "win32" || !w) return;
+  w.setAppDetails({ appId: WINDOW_APP_ID });
+  if (taskbarIcon) w.setIcon(taskbarIcon);
+}
+
 // ── Menú del Dock y ventana de estado ───────────────────────────────────────
 function statusLines() {
   const s = currentState(), now = Date.now(), lines = [];
@@ -200,33 +446,41 @@ function statusLines() {
   else lines.push(s.error || "Conectando con claude.ai…");
   return lines;
 }
-const radio = (items, current, set) => items.map(([label, value]) => ({ label, type: "radio", checked: current === value, click: () => set(value) }));
 function updateSetting(key, value) {
+  if (key === "updateChannel" && !updates.CHANNELS.includes(value)) return;
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
-  if (key === "source" || key === "priority") { errors = 0; loginShown = false; if (sourceOrder().includes("web") && !win) createSessionWindow(); tick(); }
+  if (key === "updateCheck") { if (value) checkUpdates(); else refreshAdvice(); }
+  if (key === "updateChannel") { latest = null; refreshAdvice(); checkUpdates(); }   // lo del canal anterior ya no vale
+  if (key === "source" || key === "priority") {
+    errors = 0; loginShown = false;
+    if (sourceOrder().includes("web") && !win) createSessionWindow();
+    if (key === "source" && value === "remote" && !remoteUrl()) showPanel("settings");      // los campos de URL y token están en Ajustes
+    if (key === "source" && value !== "remote") refreshAdvice();                   // sin servidor propio no hay aviso sobre su versión
+    tick();
+  }
   render(true); refreshChrome(true);
 }
 function menuTemplate() {
   const lines = statusLines().map(label => ({ label, enabled: false }));
   if (persisted.state.status === "auth") lines[0] = { label: "Inicia sesión en claude.ai…", click: showLogin };
-  // Forma del ícono, número, transparencia y alertas se ajustan en el panel; aquí solo lo de uso diario y lo que el panel no tiene.
-  const more = [
-    { label: "Fuente de datos", submenu: radio([["Automática (con prioridad y respaldo)", "auto"], ["Solo cuenta de Claude Code (sin login)", "oauth"], ["Solo archivo de Claude Code (línea de estado)", "claude-code"], ["Solo claude.ai (ventana propia)", "web"]], settings.source, v => updateSetting("source", v)) },
-    { label: "Prioridad (en automática)", enabled: settings.source === "auto", submenu: radio([["Cuenta de Claude Code, luego archivo", "oauth"], ["Archivo de Claude Code, luego cuenta", "claude-code"], ["claude.ai, luego cuenta y archivo", "web"]], settings.priority, v => updateSetting("priority", v)) },
-    claudeCode.isConnected() ? { label: "Desconectar de Claude Code…", click: disconnectClaudeCode } : { label: "Conectar con Claude Code…", click: connectClaudeCode },
-    ...(sourceOrder().includes("web") ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
-    { label: "Frecuencia de consulta", submenu: radio([["Cada 10 s", 10], ["Cada 20 s", 20], ["Cada 30 s", 30], ["Cada 60 s", 60]], settings.pollSeconds, v => updateSetting("pollSeconds", v)) },
-    { type: "separator" },
-    { label: "Abrir al iniciar sesión", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: m => app.setLoginItemSettings({ openAtLogin: m.checked }) },
-    ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : [])
-  ];
+  const install = a => a.kind === "app" && canSelfInstall();
+  const job = publicJob();
+  const advice = job && job.phase !== "error" ? [{ label: job.phase === "download" ? `Descargando v${job.version}…` : `Instalando v${job.version}…`, click: showPanel }] : updateAdvice.map(a => ({
+    label: a.kind === "server" ? `Actualiza el servidor a v${a.version}…` : install(a) ? `Instalar v${a.version} ahora` : `Actualización disponible: v${a.version}…`,
+    click: () => install(a) ? installUpdate() : openRelease(a.url)
+  }));
+  if (settings.updateSummary) advice.push({ label: `Novedades de v${settings.updateSummary.to}…`, click: showPanel });
+  if (advice.length) lines.push({ type: "separator" }, ...advice);
+  // Todos los ajustes viven en el panel (vista «Ajustes»); el menú solo tiene lo de uso diario.
   return [
     ...lines, { type: "separator" },
-    { label: "Abrir panel", click: showPanel },
-    { label: "Actualizar ahora", click: () => tick() },
-    { label: "Más opciones", submenu: more },
+    { label: "Abrir panel", click: () => showPanel() },
+    { label: "Actualizar ahora", click: () => tick({ manual: true }) },
+    ...(settings.source === "web" ? [{ label: "Ventana de claude.ai…", click: showLogin }] : []),
+    { label: "Ajustes…", click: () => showPanel("settings") },
+    ...(canSetup() && !app.isInApplicationsFolder() ? [{ label: "Mover a Aplicaciones…", click: () => offerMove(true) }] : []),
     ...(tray ? [{ type: "separator" }, { label: "Salir", click: () => app.quit() }] : [])   // en macOS el Dock ya trae «Salir»
   ];
 }
@@ -245,19 +499,31 @@ function fitToScreen(width, height) {
 }
 function panelBounds() {
   const forced = /^(\d+)x(\d+)$/.exec(process.env.USAGE_MONITOR_PANEL_SIZE || "");
-  return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 900);
+  return forced ? { width: +forced[1], height: +forced[2] } : fitToScreen(460, 700);
+}
+// El panel avisa cuánto mide su vista de uso tras el primer render; la ventana se ajusta a eso una sola vez
+// (después manda el tamaño que elija quien la use) y nunca más alto que la pantalla.
+function fitPanel(height) {
+  if (!panelWin || panelWin.isDestroyed() || panelWin.fitted || process.env.USAGE_MONITOR_PANEL_SIZE) return;
+  panelWin.fitted = true;
+  if (!(height > 0)) return;
+  const [width] = panelWin.getContentSize();
+  panelWin.setContentSize(width, fitToScreen(width, Math.max(420, Math.ceil(height))).height);
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
-function showPanel() {
+// view = "settings" abre directamente la vista de ajustes.
+function showPanel(view) {
+  if (typeof view !== "string") view = null;      // como manejador de clic recibe el ítem del menú o el evento
+  if (panelWin && !panelWin.isDestroyed() && view) panelWin.webContents.send("storage-changed", { panelView: { newValue: view } });
   if (!panelWin || panelWin.isDestroyed()) {
     panelWin = new BrowserWindow({
       ...panelBounds(), useContentSize: true, minWidth: 340, minHeight: 420, title: "Usage Monitor", backgroundColor: "#0d0d0d",
       webPreferences: { preload: path.join(__dirname, "panel-preload.js"), contextIsolation: false }
     });
-    if (taskbarIcon) panelWin.setIcon(taskbarIcon);
+    setupTaskbar(panelWin);
     panelWin.on("closed", () => { panelWin = null; });
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
-    panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"));
+    panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"), view ? { hash: view } : {});
   }
   panelWin.show(); panelWin.focus();
 }
@@ -273,25 +539,48 @@ function storageSnapshot() {
     usageWindows: persisted.windows, usageForecastLog: persisted.forecastLog, usageBlocks: persisted.blocks || [],
     usageWeekly: persisted.weeklyLog,
     appVersion: app.getVersion(), dataSource: settings.source, dataPriority: settings.priority, claudeCodeConnected: claudeCode.isConnected(),
+    remoteUrl: remoteUrls().local, remoteUrlOnline: remoteUrls().online, remoteTokenSet: !!remoteToken(), remoteFromEnv: remoteFromEnv(),
+    serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
+    updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
+    updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary, updateProgress: publicJob(),
     alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
+    pollSeconds: settings.pollSeconds, openAtLogin: app.getLoginItemSettings().openAtLogin,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
   };
 }
-const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy" };
+const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel", pollSeconds: "pollSeconds" };
 ipcMain.handle("storage-get", (_e, keys) => {
   const all = storageSnapshot();
   if (keys == null) return all;
   const list = Array.isArray(keys) ? keys : typeof keys === "string" ? [keys] : Object.keys(keys);
   return Object.fromEntries(list.filter(k => k in all).map(k => [k, all[k]]));
 });
-ipcMain.handle("storage-set", (_e, obj) => { for (const [k, v] of Object.entries(obj || {})) if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v); });
+ipcMain.handle("storage-set", (_e, obj) => {
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (k === "pollSeconds" && ![10, 20, 30, 60].includes(v)) continue;
+    if (k === "dataPriority") { if (["oauth", "claude-code", "web"].includes(v)) updateSetting("priority", v); continue; }
+    if (k === "openAtLogin") { app.setLoginItemSettings({ openAtLogin: !!v }); refreshChrome(true); continue; }
+    if (SETTING_KEYS[k]) updateSetting(SETTING_KEYS[k], v);
+  }
+});
 ipcMain.handle("storage-remove", () => undefined);
 ipcMain.handle("runtime-message", async (_e, message) => {
+  if (message && message.type === "PANEL_FIT") return fitPanel(Number(message.height));
   if (message && message.type === "IMPORT_CSV") return importCsv();
-  if (message && message.type === "POLL_NOW") tick();
+  if (message && message.type === "POLL_NOW") await tick({ manual: true });
   if (message && message.type === "CONNECT_CLAUDE_CODE") { await connectClaudeCode(); return { ok: true }; }
-  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "oauth", "auto"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "DISCONNECT_CLAUDE_CODE") { await disconnectClaudeCode(); return { ok: true }; }
+  if (message && message.type === "OPEN_LOGIN_WINDOW") { if (!win) createSessionWindow(); showLogin(); return { ok: true }; }
+  if (message && message.type === "SET_SOURCE" && ["claude-code", "web", "remote", "oauth", "auto"].includes(message.value)) { updateSetting("source", message.value); return { ok: true }; }
+  if (message && message.type === "SET_REMOTE") return setRemote(message);
+  // Solo se copia un token generado en el panel (nada arbitrario al portapapeles).
+  if (message && message.type === "COPY_TOKEN_LINE" && /^[0-9a-f]{64}$/.test(String(message.text))) { clipboard.writeText(message.text); return { ok: true }; }
+  if (message && message.type === "OPEN_RELEASE") { openRelease(message.url); return { ok: true }; }
+  if (message && message.type === "INSTALL_UPDATE") { installUpdate(); return { ok: true }; }
+  if (message && message.type === "CANCEL_UPDATE") { cancelUpdate(); return { ok: true }; }
+  if (message && message.type === "DISMISS_UPDATE_ERROR") { if (updateJob && updateJob.phase === "error") { updateJob = null; pushProgress(true); } return { ok: true }; }
+  if (message && message.type === "DISMISS_UPDATE_SUMMARY") { saveFlag("updateSummary", null); refreshChrome(true); notifyPanel(); return { ok: true }; }
   return { ok: true };
 });
 // Importar historial: el usuario elige uno o más CSV exportados desde el panel; se fusionan con los datos actuales.
@@ -335,7 +624,7 @@ function showLogin() { if (win) { win.show(); win.focus(); } }
 function createSessionWindow() {
   const ses = session.fromPartition("persist:claude");      // las cookies de claude.ai se conservan entre ejecuciones
   win = new BrowserWindow({ ...fitToScreen(1000, 760), minWidth: 480, minHeight: 420, show: false, title: "claude.ai", webPreferences: { partition: "persist:claude", backgroundThrottling: false } });
-  if (taskbarIcon) win.setIcon(taskbarIcon);
+  setupTaskbar(win);
   win.webContents.setWindowOpenHandler(() => ({ action: "allow" }));   // el inicio de sesión con Google abre una ventana
   win.on("close", e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.webContents.on("did-finish-load", () => { if (!busy && !MOCK) setTimeout(tick, 1500); });
@@ -400,7 +689,7 @@ async function panelShot(file) {
   persisted = p;
   showPanel();
   await new Promise(r => setTimeout(r, 3500));
-  if (process.env.USAGE_MONITOR_OPEN) { await panelWin.webContents.executeJavaScript(`document.querySelector("details").open = true; window.scrollTo(0, 9999)`); await new Promise(r => setTimeout(r, 600)); }
+  if (process.env.USAGE_MONITOR_OPEN) { await panelWin.webContents.executeJavaScript(`document.getElementById("settings-btn").click()`); await new Promise(r => setTimeout(r, 600)); }
   fs.writeFileSync(file, (await panelWin.webContents.capturePage()).toPNG());
   app.exit(0);
 }
@@ -428,7 +717,7 @@ async function firstRunSetup() {
   if (!app.isInApplicationsFolder() && !settings.moveDeclined) {
     if (await offerMove(false)) return;                // se movió: la copia nueva repite esta rutina ya en Aplicaciones
   }
-  // Inicio automático: se activa la primera vez; después se respeta lo que elijas en el menú del Dock.
+  // Inicio automático: se activa la primera vez; después se respeta lo que elijas en Ajustes.
   if (!settings.loginConfigured) { app.setLoginItemSettings({ openAtLogin: true }); saveFlag("loginConfigured", true); }
 }
 
@@ -457,11 +746,13 @@ app.whenReady().then(async () => {
   }
   await render(true);
   refreshChrome(true);
-  if (MOCK || settings.source !== "web") tick();
+  if (MOCK || settings.source !== "web") tick();     // claude.ai espera a que cargue su ventana
   // Primera vez con Claude Code como fuente y sin conectar: se ofrece conectarlo una sola vez.
   if (!MOCK && sourceOrder().includes("claude-code") && !settings.connectPrompted && !claudeCode.isConnected()) { saveFlag("connectPrompted", true); showPanel(); }   // el panel trae la tarjeta «Conectar con Claude Code»
   if (!MOCK && sourceOrder().includes("web")) createSessionWindow();
   setInterval(() => { render(false); refreshChrome(); }, ICON_REFRESH_MS);
+  setTimeout(checkUpdates, 10000); setInterval(checkUpdates, UPDATE_CHECK_MS);
+  afterUpdateStartup(); noteVersionChange(); refreshUpdaterCopy();
   firstRunSetup();
   // Clic en el ícono del Dock abre el panel (se ignora el aviso inicial que macOS emite al arrancar).
   app.on("activate", () => { if (Date.now() - startedAt > 4000) showPanel(); });
