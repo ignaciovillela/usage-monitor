@@ -630,8 +630,8 @@ function weekSpec() {
   return {
     head: ["Momento", "Uso"],
     rows,
-    legend: [{ cls: "", text: "Uso" }, ...(proj ? [{ cls: "dashed", text: "Proyección" }, ...(proj.band ? [{ cls: "band-key", text: "Rango 80 %" }] : [])] : []), { cls: "ref-key", text: "Ritmo parejo" }],
-    caption: cap.replace(/  +/g, " "),
+    legend: [{ cls: "", text: "Uso" }, ...(proj ? [{ cls: "dashed", text: "Proyección" }, ...(proj.band ? [{ cls: "band-key", text: "Rango 80 %" }] : [])] : []), { cls: "ref-key", text: "Ritmo parejo" }, ...(cap ? [{ cls: "note", text: cap }] : [])],   // el cierre va en la misma fila que la leyenda
+    caption: "",
     draw(host) {
       const m = { l: 34, r: 12, t: 24, b: 22 };
       const pw = CHART_W - m.l - m.r, ph = CHART_H - m.t - m.b;

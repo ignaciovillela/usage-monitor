@@ -161,6 +161,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .legend i.ref-key { border-top: 1px solid var(--axis); }
 .legend i.band-key { height: 8px; border-top: 0; background: var(--series-1); opacity: .25; border-radius: 2px; }
 .legend i.dot-key { width: 8px; height: 8px; border: 0; border-radius: 50%; background: var(--critical); }
+.legend i.note { display: none; }
+.legend span:has(> i.note) { margin-left: auto; color: var(--ink-2); font-weight: 600; }
 .caption { margin-top: 6px; }
 
 /* Semanas: navegación entre ciclos y franjas por día */
