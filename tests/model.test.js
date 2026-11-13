@@ -303,6 +303,8 @@ test("weeklyForecast: marca el 100 % cuando el ritmo lo alcanza antes del reinic
   const end = wf.points[wf.points.length - 1];
   assert.strictEqual(end.value, 100);
   assert(end.ts < R_CUR);
+  for (let i = 1; i < wf.points.length; i++) assert(wf.points[i].ts > wf.points[i - 1].ts, "sin gancho tras el 100 %");
+  assert(wf.band.ts[wf.band.ts.length - 1] > end.ts, "la franja sigue después del 100 %");
 });
 
 test("weeklyForecast: rango, probabilidad e intensidad de la semana", () => {
@@ -310,8 +312,10 @@ test("weeklyForecast: rango, probabilidad e intensidad de la semana", () => {
   const cur = weeklyCycle(R_CUR, WK_NOW);
   const wf = m.weeklyForecast(log.concat([cur]), cur, WK_NOW);
   const n = wf.points.length;
-  assert.strictEqual(wf.band.lo.length, n);
+  assert(wf.band.lo.length >= n && wf.band.hi.length === wf.band.lo.length && wf.band.ts.length === wf.band.lo.length);
   for (let i = 0; i < n; i++) assert(wf.band.lo[i] <= wf.points[i].value + 1e-9 && wf.points[i].value <= wf.band.hi[i] + 1e-9, `banda en ${i}`);
+  for (let i = 1; i < wf.points.length; i++) assert(wf.points[i].ts > wf.points[i - 1].ts, "la línea no retrocede en el tiempo");
+  assert.strictEqual(wf.band.ts[wf.band.ts.length - 1], R_CUR, "la franja llega hasta el reinicio");
   assert(wf.pHit >= 0 && wf.pHit <= 1);
   assert(Math.abs(wf.theta - 1) < 0.35, `θ ${wf.theta}`);                       // semana igual a las anteriores
   // Determinista para el mismo instante.

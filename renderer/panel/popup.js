@@ -508,24 +508,25 @@ function renderWeekChart() {
     if (wf) {
       wf.points[0] = { ts: tEnd, value: last.value };
       const e = wf.points[wf.points.length - 1];
-      proj = { points: wf.points, band: wf.band, ts: e.ts, value: e.value, hit: wf.hit, learning: wf.learning, cycles: wf.cycles, pHit: wf.pHit, hitQ: wf.hitQ, finalQ: wf.finalQ };
+      proj = { points: wf.points, band: wf.band, series: wf.band, ts: e.ts, value: e.value, hit: wf.hit, learning: wf.learning, cycles: wf.cycles, pHit: wf.pHit, hitQ: wf.hitQ, finalQ: wf.finalQ };
     } else {
       const rate = last.value / (tEnd - t0), hitTs = tEnd + (100 - last.value) / rate;
       const e = hitTs < t1 ? { ts: hitTs, value: 100 } : { ts: t1, value: last.value + rate * (t1 - tEnd) };
-      proj = { points: [{ ts: tEnd, value: last.value }, e], ts: e.ts, value: e.value, hit: hitTs < t1, linear: true };
+      proj = { points: [{ ts: tEnd, value: last.value }, e], series: { ts: [tEnd, e.ts], mid: [last.value, e.value], lo: null, hi: null }, ts: e.ts, value: e.value, hit: hitTs < t1, linear: true };
     }
   }
-  // Mediana y rango de la proyección en el instante t (interpolación entre puntos).
+  // Mediana y rango de la proyección en el instante t (interpolación entre puntos; la franja llega hasta el reinicio).
   const projAt = t => {
-    const ps = proj.points, b = proj.band;
-    for (let i = 1; i < ps.length; i++) {
-      if (t > ps[i].ts) continue;
-      const f = (t - ps[i - 1].ts) / Math.max(1, ps[i].ts - ps[i - 1].ts), mix = (a, c) => a + (c - a) * f;
-      return { value: mix(ps[i - 1].value, ps[i].value), lo: b ? mix(b.lo[i - 1], b.lo[i]) : null, hi: b ? mix(b.hi[i - 1], b.hi[i]) : null };
+    const sr = proj.series;
+    for (let i = 1; i < sr.ts.length; i++) {
+      if (t > sr.ts[i]) continue;
+      const f = (t - sr.ts[i - 1]) / Math.max(1, sr.ts[i] - sr.ts[i - 1]), mix = a => a[i - 1] + (a[i] - a[i - 1]) * f;
+      return { value: mix(sr.mid), lo: sr.lo ? mix(sr.lo) : null, hi: sr.hi ? mix(sr.hi) : null };
     }
-    const e = ps.length - 1;
-    return { value: ps[e].value, lo: b ? b.lo[e] : null, hi: b ? b.hi[e] : null };
+    const e = sr.ts.length - 1;
+    return { value: sr.mid[e], lo: sr.lo ? sr.lo[e] : null, hi: sr.hi ? sr.hi[e] : null };
   };
+  const projEnd = () => proj.series.ts[proj.series.ts.length - 1];
 
   // Días locales que cruzan el ciclo, recortados a [t0, t1].
   const days = [];
@@ -560,8 +561,8 @@ function renderWeekChart() {
   svg("path", { class: "line", d: path }, root);
   if (proj) {
     if (proj.band) {
-      const up = proj.points.map((p, i) => `${x(p.ts).toFixed(1)},${y(proj.band.hi[i]).toFixed(1)}`);
-      const down = proj.points.map((p, i) => `${x(p.ts).toFixed(1)},${y(proj.band.lo[i]).toFixed(1)}`).reverse();
+      const up = proj.band.ts.map((ts, i) => `${x(ts).toFixed(1)},${y(proj.band.hi[i]).toFixed(1)}`);
+      const down = proj.band.ts.map((ts, i) => `${x(ts).toFixed(1)},${y(proj.band.lo[i]).toFixed(1)}`).reverse();
       svg("path", { class: "band", d: `M${up.join("L")}L${down.join("L")}Z` }, root);
     }
     svg("path", { class: "proj", d: proj.points.map((p, i) => `${i ? "L" : "M"}${x(p.ts).toFixed(1)},${y(p.value).toFixed(1)}`).join("") }, root);
@@ -575,7 +576,7 @@ function renderWeekChart() {
   svg("circle", { class: "dot", r: 4, cx: x(tEnd), cy: y(last.value) }, root);
 
   const show = (t, clientX, clientY) => {
-    t = Math.min(proj ? proj.ts : tEnd, Math.max(pts[0].ts, t));
+    t = Math.min(proj ? projEnd() : tEnd, Math.max(pts[0].ts, t));
     const projected = proj && t > tEnd;
     const pr = projected ? projAt(t) : null, v = projected ? pr.value : valueAt(t);
     cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t)); cross.setAttribute("visibility", "visible");
@@ -609,7 +610,7 @@ function renderWeekChart() {
   if (proj && proj.finalQ) {
     const pct = Math.round(proj.pHit * 100);
     cap += ` Prob. de agotarlo antes del reinicio: ${pct < 1 && proj.pHit > 0 ? "<1" : pct} %`
-      + (proj.hitQ ? `, lo más probable ${wkday(proj.hitQ[1])}` : "")
+      + (proj.hitQ ? `, ${proj.hit ? "lo más probable" : "si ocurre, lo más probable"} ${wkday(proj.hit ? proj.ts : proj.hitQ[1])}` : "")
       + `. Al reinicio ~${fmtPct(proj.finalQ[1], 0)} (rango ${Math.round(proj.finalQ[0])}–${Math.round(proj.finalQ[2])} %).`
       + ` Punteada: mediana según tus horas habituales (lun–vie y fin de semana), franja: rango 80 %.`
       + (proj.learning ? ` Aún aprendiendo: ${proj.cycles} ${proj.cycles === 1 ? "ciclo" : "ciclos"} de historial.` : "");
