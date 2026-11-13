@@ -510,11 +510,13 @@ function panelBounds() {
 // El panel avisa cuánto mide su vista de uso tras el primer render; la ventana se ajusta a eso una sola vez
 // (después manda el tamaño que elija quien la use) y nunca más alto que la pantalla.
 function fitPanel(height) {
-  if (!panelWin || panelWin.isDestroyed() || panelWin.fitted || process.env.USAGE_MONITOR_PANEL_SIZE) return;
-  panelWin.fitted = true;
+  // Sigue al alto del contenido (cambia entre Ventana y Semana, avisos, datos que llegan) mientras el usuario no haya
+  // cambiado el tamaño a mano: así no sobra scroll ni espacio vacío al pie.
+  if (!panelWin || panelWin.isDestroyed() || panelWin.userSized || process.env.USAGE_MONITOR_PANEL_SIZE) return;
   if (!(height > 0)) return;
-  const [width] = panelWin.getContentSize();
-  panelWin.setContentSize(width, fitToScreen(width, Math.max(420, Math.ceil(height))).height);
+  const [width, current] = panelWin.getContentSize();
+  const target = fitToScreen(width, Math.max(420, Math.ceil(height))).height;
+  if (target !== current) panelWin.setContentSize(width, target);
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
 // view = "settings" abre directamente la vista de ajustes.
@@ -528,6 +530,7 @@ function showPanel(view) {
     });
     setupTaskbar(panelWin);
     panelWin.on("closed", () => { panelWin = null; });
+    panelWin.on("will-resize", () => { panelWin.userSized = true; });      // solo se dispara con cambios hechos por el usuario
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
     panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"), view ? { hash: view } : {});
   }

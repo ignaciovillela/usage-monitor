@@ -1035,9 +1035,19 @@ $("open-at-login").addEventListener("change", e => chrome.storage.local.set({ op
 if (location.hash === "#settings") showSettings(true);
 setInterval(() => { model.now = Date.now(); renderSummary(); }, 15000);
 
+// La ventana toma el alto que pide la vista de uso (sin espacio vacío ni scroll sobrante); los ajustes, más largos, se desplazan.
+// Se repite cuando cambia el alto (Ventana/Semana, avisos, datos nuevos); la app lo ignora si el usuario cambió el tamaño a mano.
+let fitTimer = null;
+function fitPanel() {
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(() => {
+    if (!$("view-usage").hidden) chrome.runtime.sendMessage({ type: "PANEL_FIT", height: Math.ceil(document.querySelector("main").getBoundingClientRect().height) });
+  }, 120);
+}
+new ResizeObserver(fitPanel).observe(document.querySelector("main"));
+
 load().then(() => {
-  // La ventana toma el alto que pide la vista de uso (sin espacio vacío al pie); los ajustes, más largos, se desplazan.
-  if (!$("view-usage").hidden) chrome.runtime.sendMessage({ type: "PANEL_FIT", height: Math.ceil(document.querySelector("main").getBoundingClientRect().height) });
+  fitPanel();
   // Al abrir, refrescar si el dato tiene más de 30 s.
   if (!model.state.updatedAt || Date.now() - model.state.updatedAt > 30000) pollNow();
 });
