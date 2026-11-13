@@ -567,15 +567,15 @@ function weekSpec() {
 
   const past = t1 <= now;
   const wkday = ts => `${new Date(ts).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(ts)}`;
-  let cap = `${weeklyLabel(key)}: ${past ? "cerró en" : ""} ${fmtPct(past ? cycle[2] : last.value, 0)}${past ? "" : " usado"}. ${past ? "Reinició" : "Reinicio"} ${dayLabel(t1)} ${fmtClock(t1)}. La línea gris es el ritmo parejo.`;
+  let cap = `${weeklyLabel(key)}: ${past ? "cerró en" : ""} ${fmtPct(past ? cycle[2] : last.value, 0)}${past ? "" : " usado"}. ${past ? "Reinició" : "Reinicio"} ${dayLabel(t1)} ${fmtClock(t1)}.`;
   if (proj && proj.finalQ) {
     const pct = Math.round(proj.pHit * 100);
     cap += ` Prob. de agotarlo antes del reinicio: ${pct < 1 && proj.pHit > 0 ? "<1" : pct} %`
       + (proj.hitQ ? `, lo más probable ${wkday(proj.hitQ[1])}` : "")
       + `. Al reinicio ~${fmtPct(proj.finalQ[1], 0)} (rango ${Math.round(proj.finalQ[0])}–${Math.round(proj.finalQ[2])} %).`
-      + ` Punteada: mediana según tus horas habituales (lun–vie y fin de semana), franja: rango 80 %.`
+      + ` Proyección según tus horas habituales (lun–vie y fin de semana).`
       + (proj.learning ? ` Aún aprendiendo: ${proj.cycles} ${proj.cycles === 1 ? "ciclo" : "ciclos"} de historial.` : "");
-  } else if (proj) cap += " La punteada proyecta el ritmo medio del ciclo.";
+  } else if (proj) cap += " Proyección con el ritmo medio del ciclo.";
 
 
   const rows = [];
