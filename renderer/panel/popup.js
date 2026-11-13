@@ -689,14 +689,6 @@ function weekSpec() {
         show(t0 + Math.min(1, Math.max(0, (px - m.l) / pw)) * WEEK_MS, e.clientX, e.clientY);
       });
       root.addEventListener("pointerleave", hide);
-      let k = pts.length - 1;
-      root.addEventListener("keydown", e => {
-        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-        e.preventDefault();
-        k = Math.min(pts.length - 1, Math.max(0, k + (e.key === "ArrowRight" ? 1 : -1)));
-        const r = root.getBoundingClientRect();
-        show(pts[k].ts, r.left + x(pts[k].ts) * r.width / CHART_W, r.top + y(pts[k].value) * r.height / CHART_H);
-      });
       root.addEventListener("blur", hide);
     },
   };
@@ -946,13 +938,12 @@ $("scope-btn").addEventListener("click", () => {
 try { if (localStorage.getItem("scope") === "week") { ui.scope = "week"; $("scope-btn").textContent = "Semana"; $("scope-btn").setAttribute("aria-pressed", "true"); } } catch {}
 $("week-prev").addEventListener("click", () => { ui.weekBack++; renderChart(); });
 $("week-next").addEventListener("click", () => { ui.weekBack--; renderChart(); });
-// Teclado (en la vista «Semana»): [ o Mayús+← = semana anterior; ] o Mayús+→ = semana siguiente.
-// Las flechas solas siguen recorriendo los puntos del gráfico cuando está enfocado.
+// Teclado (en la vista «Semana»): ← o [ = semana anterior; → o ] = semana siguiente.
 document.addEventListener("keydown", e => {
   if (ui.scope !== "week" || !$("view-settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest && e.target.closest("input, select, textarea")) return;
-  const dir = e.key === "[" || (e.shiftKey && e.key === "ArrowLeft") ? 1 : e.key === "]" || (e.shiftKey && e.key === "ArrowRight") ? -1 : 0;
-  if (!dir) return;
+  const dir = e.key === "[" || e.key === "ArrowLeft" ? 1 : e.key === "]" || e.key === "ArrowRight" ? -1 : 0;
+  if (!dir || e.shiftKey) return;
   e.preventDefault();
   ui.weekBack = Math.max(0, ui.weekBack + dir);
   renderChart();
