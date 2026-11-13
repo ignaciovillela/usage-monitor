@@ -392,8 +392,13 @@ function notify(e) {
 // ── Ícono del Dock ──────────────────────────────────────────────────────────
 function iconParamsNow() {
   const now = Date.now(), state = currentState();
+  const num = { scale: settings.numScale, dx: settings.numDx, dy: settings.numDy };
+  if (settings.scope === "week") {      // vista «Semana»: el ícono muestra el ciclo semanal (uso y tiempo de 7 días)
+    const wb = engine.weekBadge(state, persisted.weeklyLog, settings.mode, now);
+    return { level: wb.level, text: wb.text, params: engine.iconParams(wb.state, wb.level, now, wb.text, settings.shape, "255,255,255", settings.alpha, num, 7 * 24 * 3600e3) };
+  }
   const { level, text } = engine.badgeInfo(state, settings.mode, now);
-  return { level, text, params: engine.iconParams(state, level, now, text, settings.shape, "255,255,255", settings.alpha, { scale: settings.numScale, dx: settings.numDx, dy: settings.numDy }) };
+  return { level, text, params: engine.iconParams(state, level, now, text, settings.shape, "255,255,255", settings.alpha, num) };
 }
 async function drawDockIcon(params, size = 512, plate = process.platform === "darwin") {   // en Windows sin placa: el anillo llena todo el ícono
   const dataUrl = await iconWin.webContents.executeJavaScript(`renderIcon(${JSON.stringify(params)}, ${size}, ${plate})`);
@@ -404,7 +409,7 @@ function render(force) {
   renderChain = renderChain.then(async () => {
     try {
       const { level, text, params } = iconParamsNow();
-      const key = [level, text, settings.shape, settings.alpha, settings.numScale, settings.numDx, settings.numDy, Math.round(params.usage * 1000), Math.round(params.elapsed * 2000)].join("|");
+      const key = [level, text, settings.scope, settings.shape, settings.alpha, settings.numScale, settings.numDx, settings.numDy, Math.round(params.usage * 1000), Math.round(params.elapsed * 2000)].join("|");
       if (!force && key === lastIconKey) return;
       lastIconKey = key;
       if (process.env.USAGE_MONITOR_DEBUG) console.log(new Date().toISOString().slice(11, 23), "ícono", key);
@@ -448,6 +453,7 @@ function statusLines() {
 }
 function updateSetting(key, value) {
   if (key === "updateChannel" && !updates.CHANNELS.includes(value)) return;
+  if (key === "scope" && value !== "window" && value !== "week") return;
   settings = { ...settings, [key]: value };
   store.saveSettings(settings);
   if (key === "pollSeconds") schedule();
@@ -504,11 +510,13 @@ function panelBounds() {
 // El panel avisa cuánto mide su vista de uso tras el primer render; la ventana se ajusta a eso una sola vez
 // (después manda el tamaño que elija quien la use) y nunca más alto que la pantalla.
 function fitPanel(height) {
-  if (!panelWin || panelWin.isDestroyed() || panelWin.fitted || process.env.USAGE_MONITOR_PANEL_SIZE) return;
-  panelWin.fitted = true;
+  // Sigue al alto del contenido (cambia entre Ventana y Semana, avisos, datos que llegan) mientras el usuario no haya
+  // cambiado el tamaño a mano: así no sobra scroll ni espacio vacío al pie.
+  if (!panelWin || panelWin.isDestroyed() || panelWin.userSized || process.env.USAGE_MONITOR_PANEL_SIZE) return;
   if (!(height > 0)) return;
-  const [width] = panelWin.getContentSize();
-  panelWin.setContentSize(width, fitToScreen(width, Math.max(420, Math.ceil(height))).height);
+  const [width, current] = panelWin.getContentSize();
+  const target = fitToScreen(width, Math.max(420, Math.ceil(height))).height;
+  if (target !== current) panelWin.setContentSize(width, target);
 }
 // Panel: el popup (gráficos, ajustes) dentro de una ventana, con los datos de la app en lugar de chrome.storage.
 // view = "settings" abre directamente la vista de ajustes.
@@ -522,6 +530,7 @@ function showPanel(view) {
     });
     setupTaskbar(panelWin);
     panelWin.on("closed", () => { panelWin = null; });
+    panelWin.on("will-resize", () => { panelWin.userSized = true; });      // solo se dispara con cambios hechos por el usuario
     if (process.env.USAGE_MONITOR_DEBUG) panelWin.webContents.on("console-message", (_e, level, message, line, source) => console.log("panel:", level, message, `(${path.basename(source)}:${line})`));
     panelWin.loadFile(path.join(__dirname, "..", "renderer", "panel", "popup.html"), view ? { hash: view } : {});
   }
@@ -543,13 +552,13 @@ function storageSnapshot() {
     serverVersion: settings.source === "remote" && remoteInfo ? remoteInfo.version : null, remoteVia: settings.source === "remote" && remoteInfo ? remoteInfo.via : null,
     updateAdvice, updateCheck: settings.updateCheck, repoUrl: releases.repo,
     updateChannel: updateChannel(), canInstallUpdate: canSelfInstall(), updateSummary: settings.updateSummary, updateProgress: publicJob(),
-    alertsEnabled: settings.alerts, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
+    alertsEnabled: settings.alerts, viewScope: settings.scope, badgeMode: settings.mode, iconShape: settings.shape, numberAlpha: settings.alpha,
     numberScale: settings.numScale, numberDx: settings.numDx, numberDy: settings.numDy,
     pollSeconds: settings.pollSeconds, openAtLogin: app.getLoginItemSettings().openAtLogin,
     badgeStyle: "inside", numberInk: "auto", projectionEngine: "prob"
   };
 }
-const SETTING_KEYS = { alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel", pollSeconds: "pollSeconds" };
+const SETTING_KEYS = { viewScope: "scope", alertsEnabled: "alerts", badgeMode: "mode", iconShape: "shape", numberAlpha: "alpha", numberScale: "numScale", numberDx: "numDx", numberDy: "numDy", updateCheck: "updateCheck", updateChannel: "updateChannel", pollSeconds: "pollSeconds" };
 ipcMain.handle("storage-get", (_e, keys) => {
   const all = storageSnapshot();
   if (keys == null) return all;

@@ -14,6 +14,7 @@
         <p id="status" class="muted">Consultando…</p>
       </div>
       <div class="header-actions">
+        <button id="scope-btn" class="text-btn scope-btn" title="Cambiar entre la ventana de 5 h y la semana" aria-pressed="false">Ventana</button>
         <button id="refresh" class="icon-btn" title="Actualizar ahora" aria-label="Actualizar ahora">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
         </button>
@@ -68,10 +69,19 @@
 
       <section class="card charts">
         <div class="chart-bar">
-          <div class="segmented" role="tablist" aria-label="Gráfico">
+          <div id="tabs" class="segmented" role="tablist" aria-label="Gráfico">
             <button role="tab" data-tab="window" aria-selected="true">Ventana</button>
             <button role="tab" data-tab="hours" aria-selected="false">24 horas</button>
             <button role="tab" data-tab="windows" aria-selected="false">Ventanas</button>
+          </div>
+          <div id="week-nav" class="week-nav" hidden>
+            <button id="week-prev" class="icon-btn small" title="Semana anterior (← o [)" aria-label="Semana anterior" aria-keyshortcuts="ArrowLeft [">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+            </button>
+            <span id="week-range" class="week-range" aria-live="polite"></span>
+            <button id="week-next" class="icon-btn small" title="Semana siguiente (→ o ])" aria-label="Semana siguiente" aria-keyshortcuts="ArrowRight ]">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
           </div>
           <button id="view-toggle" class="link-btn" aria-pressed="false">Ver tabla</button>
         </div>

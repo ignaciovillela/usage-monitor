@@ -19,6 +19,7 @@ async function download(asset, dest, { onProgress = () => {}, signal, userAgent 
   const hash = crypto.createHash("sha256");
   const out = fs.createWriteStream(dest);
   const done = new Promise((resolve, reject) => { out.once("finish", resolve); out.once("error", reject); });
+  done.catch(() => {});      // si se cancela, el error del stream no debe quedar sin atender
   let received = 0, last = 0;
   try {
     for await (const chunk of res.body) {
@@ -31,7 +32,7 @@ async function download(asset, dest, { onProgress = () => {}, signal, userAgent 
     out.end();
     await done;
   } catch (e) {
-    out.destroy();
+    await new Promise(r => { out.once("close", r); out.destroy(); });   // esperar al cierre: si no, el archivo puede crearse después de borrarlo
     fs.rmSync(dest, { force: true });
     throw e;
   }

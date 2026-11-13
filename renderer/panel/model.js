@@ -438,6 +438,122 @@ function updateWeeklyLog(log, weekly, now) {
   }
   return { log: list, changed };
 }
+// ── Proyección semanal por perfil horario ───────────────────────────────────
+// Aprende cuánto sube el % semanal en cada hora del día, por separado de lunes a viernes y en fin de semana (48 tramos de
+// 1 h), a partir de los ciclos guardados (el actual incluido). Cada tramo se suaviza con sus horas vecinas y se acerca al
+// promedio de su grupo mientras haya pocas muestras; los ciclos recientes pesan más. El uso semanal es entero, así que
+// tramos más cortos que una hora serían casi puro ruido.
+const WK_RESOLVED_MS = 90 * MINUTE;   // una subida solo se asigna a una hora si las dos lecturas están así de cerca
+const WK_IDLE_MAX_MS = 7 * HOUR;      // sin cambio de valor se da por «sin uso» mientras haya lecturas (keepalive de 6 h)
+const WK_DECAY = 0.7;                 // peso de un ciclo respecto del siguiente más nuevo
+const WK_KAPPA = 3;                   // horas virtuales que aporta el promedio del grupo (laboral / fin de semana)
+const WK_PATHS = 400, WK_SHAPE = 1.5;       // trayectorias simuladas; forma de la gamma de cada hora (menor = más a ráfagas)
+const WK_THETA_PRIOR = 6;             // pp virtuales que acercan la intensidad de la semana a lo habitual (θ = 1)
+const WK_SIGMA_MIN = 0.2, WK_SIGMA_EXTRA = 0.25;   // desviación (log) de θ entre trayectorias; baja con las horas observadas
+const WK_MIN_CYCLES = 3;              // ciclos completos para dejar de mostrar «aún aprendiendo»
+function wkSlot(ts) {   // 0..23 laborable, 24..47 fin de semana (hora local)
+  const d = new Date(ts), dow = d.getDay();
+  return d.getHours() + (dow === 0 || dow === 6 ? 24 : 0);
+}
+
+// Por hora de un ciclo: [cobertura 0..1, puntos subidos]. `unresolved` = subidas sin resolución fina (lecturas muy separadas).
+function weeklyCycleHours(pts, t0, t1, now) {
+  const hours = new Map();
+  let rise = 0, unresolved = 0;
+  // El uso semanal no baja dentro de un ciclo: las lecturas que alternan entre dos valores (dos fuentes que difieren en 1 pp)
+  // se aplanan con el máximo acumulado, o cada vaivén contaría como consumo.
+  let top = -Infinity;
+  const list = pts.map(p => [p[0], (top = Math.max(top, p[1]))]), last = list[list.length - 1];
+  if (t1 > now && now > last[0]) list.push([now, last[1]]);
+  for (let i = 1; i < list.length; i++) {
+    const a = list[i - 1], b = list[i], gap = b[0] - a[0], r = b[1] - a[1];
+    if (gap <= 0 || r < 0) continue;
+    if (r > 0) { rise += r; if (gap > WK_RESOLVED_MS) { unresolved += r; continue; } }
+    else if (gap > WK_IDLE_MAX_MS) continue;
+    const s = Math.max(a[0], t0), e = Math.min(b[0], t1);
+    if (e <= s) continue;
+    for (let h = new Date(s).setMinutes(0, 0, 0); h < e; h += HOUR) {
+      const ov = Math.min(e, h + HOUR) - Math.max(s, h);
+      if (ov <= 0) continue;
+      const cell = hours.get(h) || [0, 0];
+      cell[0] += ov / HOUR; cell[1] += r * ov / gap;
+      hours.set(h, cell);
+    }
+  }
+  return { hours, rise, unresolved };
+}
+
+// log: weeklyLog; cur: el ciclo en curso [key, reinicio, pico, puntos]. Devuelve la trayectoria hasta el reinicio (o hasta
+// tocar el 100 %) o null si no hay datos con resolución suficiente.
+function weeklyForecast(log, cur, now) {
+  const key = cur[0], t1 = cur[1];
+  if (!(t1 > now)) return null;
+  const cycles = log.filter(r => r[0] === key && Number.isFinite(r[1]) && r[1] <= t1 && r[3] && r[3].length).sort((a, b) => b[1] - a[1]);
+  const num = new Array(48).fill(0), den = new Array(48).fill(0);
+  let past = 0, age = 0;
+  for (const r of cycles) {
+    const { hours, rise, unresolved } = weeklyCycleHours(r[3], r[1] - 7 * DAY_MS, r[1], now);
+    if (rise > 0 && unresolved / rise > 0.3) continue;      // ciclo registrado con pocas lecturas: no sirve para el perfil
+    const rec = Math.pow(WK_DECAY, age++);
+    if (r[1] <= now) past++;
+    for (const [h, [cov, pp]] of hours) { const sl = wkSlot(h); num[sl] += pp * rec; den[sl] += cov * rec; }
+  }
+  const sn = [0, 0], sd = [0, 0];
+  for (let s = 0; s < 48; s++) { sn[s < 24 ? 0 : 1] += num[s]; sd[s < 24 ? 0 : 1] += den[s]; }
+  if (sd[0] + sd[1] <= 0) return null;
+  const mean = c => sd[c] > 0 ? sn[c] / sd[c] : sn[1 - c] / sd[1 - c];
+  const rate = new Array(48);
+  for (let s = 0; s < 48; s++) {
+    const c = s < 24 ? 0 : 1, base = c * 24, h = s - base, nb = k => base + (h + k + 24) % 24;
+    const n = 0.5 * num[s] + 0.25 * (num[nb(-1)] + num[nb(1)]), d = 0.5 * den[s] + 0.25 * (den[nb(-1)] + den[nb(1)]);
+    rate[s] = (n + WK_KAPPA * mean(c)) / (d + WK_KAPPA);
+  }
+  // Intensidad de la semana (θ): cuánto va el ciclo actual por encima o por debajo de lo habitual para las horas ya
+  // transcurridas. Se acerca a 1 con pocos datos; la incertidumbre baja a medida que hay más horas observadas.
+  const v0 = Math.max(...cur[3].map(p => p[1]));
+  let expected = 0, actual = 0;
+  for (const [h, [cov, pp]] of weeklyCycleHours(cur[3], t1 - 7 * DAY_MS, t1, now).hours) { expected += rate[wkSlot(h)] * cov; actual += pp; }
+  const theta = (actual + WK_THETA_PRIOR) / (expected + WK_THETA_PRIOR);
+  const sigma = WK_SIGMA_MIN + WK_SIGMA_EXTRA / Math.sqrt(1 + expected / 25);
+
+  // Monte Carlo: cada hora restante suma una cantidad aleatoria (gamma) con media rate·θ; θ varía entre trayectorias.
+  const segs = [];
+  for (let t = now; t < t1;) {
+    const next = Math.min(new Date(t).setMinutes(0, 0, 0) + HOUR, t1);
+    segs.push({ ts: next, mean: rate[wkSlot(t)] * (next - t) / HOUR, len: next - t, t0: t });
+    t = next;
+  }
+  const rng = makeRng(Math.floor(now / HOUR) ^ (t1 >>> 8)), n = segs.length;
+  const grid = Array.from({ length: n + 1 }, () => new Float64Array(WK_PATHS)), hits = [];
+  grid[0].fill(v0);
+  for (let p = 0; p < WK_PATHS; p++) {
+    const th = theta * Math.exp(sigma * randn(rng) - sigma * sigma / 2);
+    let v = v0, hitTs = 0;
+    for (let i = 0; i < n; i++) {
+      const sg = segs[i], inc = sg.mean * th > 0 ? sampleGamma(rng, WK_SHAPE) / WK_SHAPE * sg.mean * th : 0;
+      if (!hitTs && v + inc >= 100) hitTs = sg.t0 + (inc > 0 ? (100 - v) / inc : 1) * sg.len;
+      v = Math.min(100, v + inc);
+      grid[i + 1][p] = v;
+    }
+    if (hitTs) hits.push(hitTs);
+  }
+  const points = [{ ts: now, value: v0 }], lo = [v0], hi = [v0];
+  for (let i = 1; i <= n; i++) {
+    const col = Array.from(grid[i]).sort((a, b) => a - b);
+    points.push({ ts: segs[i - 1].ts, value: quantile(col, 0.5) });
+    lo.push(quantile(col, 0.1)); hi.push(quantile(col, 0.9));
+  }
+  hits.sort((a, b) => a - b);
+  const pHit = hits.length / WK_PATHS;
+  const hitQ = hits.length ? [quantile(hits, 0.1), quantile(hits, 0.5), quantile(hits, 0.9)] : null;
+  // La línea central se corta donde la mediana toca el 100 %; la franja de rango sigue hasta el reinicio.
+  const series = { ts: points.map(p => p.ts), mid: points.map(p => p.value), lo, hi };
+  const cut = points.findIndex(p => p.value >= 99.5);
+  const hit = cut > 0;
+  if (hit) { points.length = cut + 1; points[cut] = { ts: points[cut].ts, value: 100 }; }
+  return { points, band: series, hit, pHit, hitQ, finalQ: [lo[lo.length - 1], series.mid[series.mid.length - 1], hi[hi.length - 1]],
+    theta, learning: past < WK_MIN_CYCLES, cycles: past };
+}
 // Entrada: [reinicio, ts, uso×10, pHit×1000, mediana|0]
 function appendForecastLog(log, f, resetsAt, u, now) {
   const last = log[log.length - 1];
@@ -605,4 +721,26 @@ function step(persisted, usage, now, opts = {}) {
     }
   }
   return { persisted: { samples, blocks, model, windows, forecastLog: flog, weeklyLog, state }, dirty, events };
+}
+
+// Ícono en vista «Semana»: uso y tiempo del ciclo semanal, veredicto por probabilidad de agotarlo (proyección por perfil horario).
+// Devuelve { level, text, state } con `state` mínimo para iconParams (utilización y reinicio semanales).
+function weekBadge(state, log, mode, now = Date.now()) {
+  const w = state && state.status === "connected" ? (state.weekly || []).find(x => x.key === "seven_day") || (state.weekly || [])[0] : null;
+  if (!w || !Number.isFinite(w.utilization)) return { level: state && state.status === "auth" ? "error" : "idle", text: "", state: { status: "connected", idle: true } };
+  const util = w.utilization, hasReset = Number.isFinite(w.resetsAt);
+  const elapsed = hasReset ? Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / (7 * DAY_MS))) : 0;
+  const cycle = hasReset ? (log || []).filter(r => r[0] === w.key && r[3] && r[3].length).sort((a, b) => b[1] - a[1])[0] : null;
+  const wf = cycle && util > 0 && util < 100 && elapsed > 0.1 ? weeklyForecast(log, [w.key, w.resetsAt, cycle[2], cycle[3]], now) : null;
+  let level = util >= 95 ? "danger" : util >= 90 ? "warn" : "ok";
+  if (wf) level = wf.pHit >= 0.5 ? "danger" : wf.pHit >= 0.2 || util >= 90 ? "warn" : level;
+  let text = String(Math.round(util));
+  if (mode === "pace" || mode === "prob") {
+    text = wf && (mode === "prob" || level !== "ok") ? `${Math.round(wf.pHit * 100)}%` : level === "ok" ? "" : text;
+  } else if (mode === "limit") {
+    text = wf && wf.hitQ && wf.pHit >= 0.5 ? fmtShort((wf.hitQ[1] - now) / MINUTE) : text;
+  } else if (mode === "reset" && hasReset && w.resetsAt > now) {
+    text = fmtShort((w.resetsAt - now) / MINUTE);
+  }
+  return { level, text, state: { status: "connected", utilization: util, resetsAt: w.resetsAt } };
 }

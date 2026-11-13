@@ -403,10 +403,10 @@ function drawIconNumber(ctx, size, text, ink, alpha, num = {}) {
   ctx.fillStyle = `rgba(${ink}, ${alpha})`;
   ctx.fillText(label, size / 2 + (Number(num.dx) || 0) * size, size / 2 + size * 0.035 + (Number(num.dy) || 0) * size);
 }
-function iconParams(state, level, now = Date.now(), text = "", layout = "rings", ink = "255,255,255", alpha = 0.48, num = {}) {
+function iconParams(state, level, now = Date.now(), text = "", layout = "rings", ink = "255,255,255", alpha = 0.48, num = {}, span = WINDOW_MS) {
   const ok = state && Number.isFinite(state.utilization) && !state.idle && level !== "error";
   const elapsed = ok && Number.isFinite(state.resetsAt)
-    ? Math.min(1, Math.max(0, 1 - (state.resetsAt - now) / WINDOW_MS)) : 0;
+    ? Math.min(1, Math.max(0, 1 - (state.resetsAt - now) / span)) : 0;
   return { usage: ok ? state.utilization / 100 : 0, elapsed, color: LEVEL_COLORS[level], text, layout, ink, alpha, num };
 }
 

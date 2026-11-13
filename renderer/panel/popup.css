@@ -54,6 +54,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:hover { background: var(--hover); color: var(--ink); }
 .icon-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.scope-btn { height: 32px; padding: 0 11px; border-radius: 9px; font-weight: 600; color: var(--ink-2); }
+.scope-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .icon-btn.spinning svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -125,6 +127,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 /* ── Gráficos ── */
 .charts { padding: 10px 12px 12px; }
 .chart-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 8px; margin-bottom: 8px; }
+.chart-bar #view-toggle { margin-left: auto; }
 .segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--hover); }
 .segmented button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; cursor: pointer; color: var(--ink-2); font-size: 12px; }
 .segmented button:hover { color: var(--ink); }
@@ -158,7 +161,19 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .legend i.ref-key { border-top: 1px solid var(--axis); }
 .legend i.band-key { height: 8px; border-top: 0; background: var(--series-1); opacity: .25; border-radius: 2px; }
 .legend i.dot-key { width: 8px; height: 8px; border: 0; border-radius: 50%; background: var(--critical); }
+.legend i.note { display: none; }
+.legend span:has(> i.note) { margin-left: auto; color: var(--ink-2); font-weight: 600; }
 .caption { margin-top: 6px; }
+
+/* Semanas: navegación entre ciclos y franjas por día */
+.week-nav { display: flex; align-items: center; gap: 6px; }
+.icon-btn.small { width: 26px; height: 26px; border-radius: 8px; }
+.icon-btn.small svg { width: 15px; height: 15px; }
+.icon-btn:disabled { opacity: .4; cursor: default; background: var(--surface); color: var(--ink-2); }
+.week-range { min-width: 120px; text-align: center; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.day-band { fill: var(--ink); opacity: .05; }
+.day-tick { fill: var(--muted); font-size: 10px; }
+.day-tick.today { fill: var(--ink); font-weight: 650; }
 
 .tip { position: fixed; z-index: 10; pointer-events: none; min-width: 120px; max-width: 220px; padding: 7px 9px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font-size: 11px; }
 .tip .t { color: var(--ink-2); margin-bottom: 3px; }

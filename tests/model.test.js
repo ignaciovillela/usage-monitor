@@ -252,3 +252,101 @@ test("updateWeeklyLog: un registro por ciclo y cupo, puntos solo al cambiar, ret
   assert.strictEqual(old.log.length, 1);                  // lo viejo se purga
   assert(!m.updateWeeklyLog([], [], NOW).changed && !m.updateWeeklyLog([], undefined, NOW).changed);
 });
+
+// ── Proyección semanal por perfil horario ───────────────────────────────────
+// Ciclo martes 00:00 → martes 00:00. Consumo de 2 pp/h de lun a vie entre 09 y 18 h; fin de semana sin uso.
+function weeklyCycle(reset, until, { step = 10 * MINUTE, keepalive = 6 * HOUR } = {}) {
+  const t0 = reset - 7 * 24 * HOUR, pts = [];
+  let v = 0, lastTs = -Infinity;
+  for (let ts = t0; ts <= Math.min(until, reset); ts += step) {
+    const d = new Date(ts), work = d.getDay() >= 1 && d.getDay() <= 5 && d.getHours() >= 9 && d.getHours() < 18;
+    const nv = work ? v + 2 * step / HOUR : v;
+    const val = Math.floor(nv);
+    if (ts === t0 || val !== Math.floor(v) || ts - lastTs >= keepalive) { pts.push([ts, val]); lastTs = ts; }
+    v = nv;
+  }
+  return ["seven_day", reset, pts[pts.length - 1][1], pts];
+}
+const R_CUR = new Date(2026, 10, 17, 0, 0, 0).getTime(), R_PREV = R_CUR - 7 * 24 * HOUR, R_PREV2 = R_PREV - 7 * 24 * HOUR;
+const WK_NOW = new Date(2026, 10, 12, 14, 0, 0).getTime();   // jueves 14:00
+
+test("weeklyForecast: perfil laboral/fin de semana, plano de noche y en fin de semana", () => {
+  const cur = weeklyCycle(R_CUR, WK_NOW), log = [weeklyCycle(R_PREV2, Infinity), weeklyCycle(R_PREV, Infinity), cur];
+  const wf = m.weeklyForecast(log, cur, WK_NOW);
+  assert(wf && wf.points.length > 10);
+  assert.strictEqual(wf.points[0].ts, WK_NOW);
+  const at = ts => { const p = wf.points; for (let i = 1; i < p.length; i++) if (ts <= p[i].ts) return p[i - 1].value + (p[i].value - p[i - 1].value) * (ts - p[i - 1].ts) / (p[i].ts - p[i - 1].ts); return p[p.length - 1].value; };
+  const fri0 = new Date(2026, 10, 13, 0).getTime(), fri18 = new Date(2026, 10, 13, 18).getTime();
+  const sat0 = new Date(2026, 10, 14, 0).getTime(), mon0 = new Date(2026, 10, 16, 0).getTime();
+  const friGain = at(fri18) - at(fri0), weekendGain = at(mon0) - at(sat0);
+  assert(friGain > 8, `viernes ${friGain}`);
+  assert(weekendGain < friGain * 0.25, `fin de semana ${weekendGain} vs viernes ${friGain}`);
+  assert(at(new Date(2026, 10, 13, 6).getTime()) - at(fri0) < 1.5, "madrugada casi plana");
+  assert.strictEqual(wf.learning, true);            // 2 ciclos pasados < 3
+  assert.strictEqual(wf.cycles, 2);
+  for (let i = 1; i < wf.points.length; i++) assert(wf.points[i].value >= wf.points[i - 1].value && wf.points[i].value <= 100);
+});
+
+test("weeklyForecast: un ciclo con pocas lecturas se descarta y sin datos devuelve null", () => {
+  const sparse = weeklyCycle(R_PREV, Infinity, { step: 6 * HOUR });          // una lectura cada 6 h: sin resolución fina
+  const cur = weeklyCycle(R_CUR, WK_NOW);
+  const wf = m.weeklyForecast([sparse, cur], cur, WK_NOW);
+  assert(wf && wf.cycles === 0, "el ciclo disperso no cuenta");
+  assert.strictEqual(m.weeklyForecast([], ["seven_day", R_CUR, 0, [[R_CUR - 5 * 24 * HOUR, 0]]], R_CUR - 30 * HOUR), null);
+});
+
+test("weeklyForecast: marca el 100 % cuando el ritmo lo alcanza antes del reinicio", () => {
+  const cur = weeklyCycle(R_CUR, WK_NOW);
+  cur[3].push([WK_NOW - 5 * MINUTE, 90]);                                    // ya va por 90 %
+  const wf = m.weeklyForecast([weeklyCycle(R_PREV, Infinity), cur], cur, WK_NOW);
+  assert.strictEqual(wf.hit, true);
+  const end = wf.points[wf.points.length - 1];
+  assert.strictEqual(end.value, 100);
+  assert(end.ts < R_CUR);
+  for (let i = 1; i < wf.points.length; i++) assert(wf.points[i].ts > wf.points[i - 1].ts, "sin gancho tras el 100 %");
+  assert(wf.band.ts[wf.band.ts.length - 1] > end.ts, "la franja sigue después del 100 %");
+});
+
+test("weeklyForecast: rango, probabilidad e intensidad de la semana", () => {
+  const log = [weeklyCycle(R_PREV2, Infinity), weeklyCycle(R_PREV, Infinity)];
+  const cur = weeklyCycle(R_CUR, WK_NOW);
+  const wf = m.weeklyForecast(log.concat([cur]), cur, WK_NOW);
+  const n = wf.points.length;
+  assert(wf.band.lo.length >= n && wf.band.hi.length === wf.band.lo.length && wf.band.ts.length === wf.band.lo.length);
+  for (let i = 0; i < n; i++) assert(wf.band.lo[i] <= wf.points[i].value + 1e-9 && wf.points[i].value <= wf.band.hi[i] + 1e-9, `banda en ${i}`);
+  for (let i = 1; i < wf.points.length; i++) assert(wf.points[i].ts > wf.points[i - 1].ts, "la línea no retrocede en el tiempo");
+  assert.strictEqual(wf.band.ts[wf.band.ts.length - 1], R_CUR, "la franja llega hasta el reinicio");
+  assert(wf.pHit >= 0 && wf.pHit <= 1);
+  assert(Math.abs(wf.theta - 1) < 0.35, `θ ${wf.theta}`);                       // semana igual a las anteriores
+  // Determinista para el mismo instante.
+  assert.deepStrictEqual(m.weeklyForecast(log.concat([cur]), cur, WK_NOW).finalQ, wf.finalQ);
+  // Una semana mucho más intensa que lo habitual sube θ y la probabilidad de agotarlo.
+  const heavy = weeklyCycle(R_CUR, WK_NOW);
+  const bump = heavy[3].map(([t, v]) => [t, Math.min(95, v * 2)]);
+  heavy[3] = bump;
+  const wh = m.weeklyForecast(log.concat([heavy]), heavy, WK_NOW);
+  assert(wh.theta > wf.theta && wh.pHit > wf.pHit, `θ ${wh.theta} vs ${wf.theta}, p ${wh.pHit} vs ${wf.pHit}`);
+});
+
+test("weeklyForecast: si ya va casi al límite, la probabilidad de agotarlo es alta", () => {
+  const cur = weeklyCycle(R_CUR, WK_NOW);
+  cur[3].push([WK_NOW - 5 * MINUTE, 95]);
+  const wf = m.weeklyForecast([weeklyCycle(R_PREV, Infinity), cur], cur, WK_NOW);
+  assert(wf.pHit > 0.7, `pHit ${wf.pHit}`);
+  assert(wf.hitQ && wf.hitQ[0] <= wf.hitQ[1] && wf.hitQ[1] <= wf.hitQ[2]);
+});
+
+test("weekBadge: ícono de la vista Semana usa el uso y el reinicio semanales", () => {
+  const cur = weeklyCycle(R_CUR, WK_NOW), log = [weeklyCycle(R_PREV2, Infinity), weeklyCycle(R_PREV, Infinity), cur];
+  const state = { status: "connected", utilization: 10, resetsAt: WK_NOW + HOUR, weekly: [{ key: "seven_day", utilization: cur[2], resetsAt: R_CUR }] };
+  const b = m.weekBadge(state, log, "percent", WK_NOW);
+  assert.equal(b.state.utilization, cur[2]);
+  assert.equal(b.state.resetsAt, R_CUR);
+  assert.equal(b.text, String(Math.round(cur[2])));
+  assert.ok(["ok", "warn", "danger"].includes(b.level));
+  assert.equal(m.iconParams(b.state, b.level, WK_NOW, b.text, "donut", "255,255,255", 0.7, {}, 7 * 24 * HOUR).elapsed.toFixed(2),
+    (1 - (R_CUR - WK_NOW) / (7 * 24 * HOUR)).toFixed(2));
+  const none = m.weekBadge({ status: "connected", utilization: 10, resetsAt: WK_NOW + HOUR }, log, "pace", WK_NOW);
+  assert.equal(none.text, "");
+  assert.equal(none.level, "idle");
+});

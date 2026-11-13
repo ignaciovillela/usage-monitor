@@ -77,7 +77,8 @@ test("actualización manual: POST consulta claude.ai al momento, con límite de 
     res.setHeader("Content-Type", "application/json");
     if (req.url === "/api/organizations") return res.end(JSON.stringify([{ uuid: "org-1", capabilities: ["chat"] }]));
     usageCalls++;
-    res.end(JSON.stringify({ ...CLAUDE_AI, five_hour: { ...CLAUDE_AI.five_hour, utilization: 40 + usageCalls } }));
+    const body = JSON.stringify({ ...CLAUDE_AI, five_hour: { ...CLAUDE_AI.five_hour, utilization: 40 + usageCalls } });
+    setTimeout(() => res.end(body), 100);      // la consulta tarda: así los dos POST simultáneos siempre se solapan
   });
   const base = await listen(upstream);
   const config = { ...readConfig({}), sessionKey: "sk", apiToken: "none", baseUrl: base, refreshMinSeconds: 60 };

@@ -16,7 +16,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CHART_W = 400;
 const CHART_H = 190;
 
-const ui = { tab: "window", view: "chart" };
+const ui = { tab: "window", view: "chart", weekBack: 0, scope: "window" };   // scope: "window" (ventana de 5 h) o "week" (ciclo semanal)   // weekBack: cuántos ciclos semanales hacia atrás
 let model = { state: {}, samples: [], now: Date.now() };
 
 const $ = id => document.getElementById(id);
@@ -130,10 +130,15 @@ function renderSummary() {
     $("at-reset-sub").textContent = "proyección";
   }
   document.querySelector(".hero").dataset.level = level;
+  if (ui.scope === "week") renderWeekHero(s, connected);
 
   const weekly = $("weekly");
   weekly.replaceChildren();
-  for (const w of s.weekly || []) {
+  // En la vista «Semana» la tarjeta principal es la semanal, así que esta fila pasa a mostrar la ventana de 5 h.
+  const rowsData = ui.scope === "week"
+    ? (connected && Number.isFinite(s.utilization) ? [{ label: "Ventana 5 h", utilization: s.utilization, resetsAt: s.idle ? NaN : s.resetsAt, span: WINDOW_MS }] : [])
+    : (s.weekly || []).map(w => ({ label: weeklyLabel(w.key), utilization: w.utilization, resetsAt: w.resetsAt, span: WEEK_MS }));
+  for (const w of rowsData) {
     const row = html("div", "weekly-row");
     const meter = html("div", "meter");
     const f = html("div", `meter-fill ${w.utilization >= 90 ? "danger" : w.utilization >= 70 ? "warn" : ""}`);
@@ -141,7 +146,7 @@ function renderSummary() {
     meter.append(f);
     // Marca de tiempo transcurrido de la semana (la ventana semanal dura 7 días desde su inicio).
     if (Number.isFinite(w.resetsAt)) {
-      const elapsed = Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / WEEK_MS));
+      const elapsed = Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / w.span));
       const mark = html("div", "meter-time");
       mark.style.display = "block";
       mark.style.left = `${elapsed * 100}%`;
@@ -150,7 +155,7 @@ function renderSummary() {
       meter.setAttribute("role", "img");
       meter.setAttribute("aria-label", row.title);
     }
-    row.append(html("span", "", weeklyLabel(w.key)), meter, html("span", "value", fmtPct(w.utilization, 0)));
+    row.append(html("span", "", w.label), meter, html("span", "value", fmtPct(w.utilization, 0)));
     weekly.append(row);
   }
   weekly.hidden = !weekly.childElementCount;
@@ -158,6 +163,54 @@ function renderSummary() {
   const error = $("error");
   error.hidden = connected || !s.error;
   error.textContent = s.error || "";
+}
+
+// Vista «Semana»: la tarjeta principal pasa a los valores del ciclo semanal (uso, veredicto, reinicio, proyección por perfil horario).
+function renderWeekHero(s, connected) {
+  const now = model.now;
+  const w = connected ? (s.weekly || []).find(x => x.key === "seven_day") || (s.weekly || [])[0] : null;
+  const hero = document.querySelector(".hero");
+  const util = w && Number.isFinite(w.utilization) ? w.utilization : null;
+  const hasReset = !!w && Number.isFinite(w.resetsAt);
+  $("percent").textContent = util === null ? "—%" : fmtPct(util);
+  $("meter-fill").style.width = `${util === null ? 0 : util}%`;
+  const timeMark = $("meter-time");
+  const elapsed = hasReset ? Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / WEEK_MS)) : null;
+  timeMark.style.display = elapsed === null ? "none" : "block";
+  if (elapsed !== null) timeMark.style.left = `${elapsed * 100}%`;
+  $("elapsed").textContent = elapsed === null ? "—" : `${Math.round(elapsed * 100)}%`;
+  $("reset").textContent = hasReset ? `${new Date(w.resetsAt).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(w.resetsAt)}` : "—";
+  $("reset-in").textContent = hasReset ? `en ${fmtReset(w.resetsAt)}` : "";
+  const day = elapsed ? elapsed * 7 : 0;
+  $("rate").textContent = util !== null && day >= 0.25 ? `${num(util / day)} %/día` : "—";
+  $("confidence").textContent = "promedio";
+  let level = util !== null && util >= 90 ? "danger" : util !== null && util >= 70 ? "warn" : "ok";
+  let icon = "✓", head = util === null ? "Sin datos semanales" : "Vas bien esta semana", detail = "", why = "";
+  $("limit").textContent = "—"; $("limit-in").textContent = "";
+  $("at-reset").textContent = "—"; $("at-reset-sub").textContent = "proyección";
+  const log = model.weeklyLog || [];
+  const cycle = hasReset ? log.filter(r => r[0] === w.key && r[3] && r[3].length).sort((a, b) => b[1] - a[1])[0] : null;
+  const wf = cycle && util > 0 && util < 100 && elapsed > 0.1 ? weeklyForecast(log, [w.key, w.resetsAt, cycle[2], cycle[3]], now) : null;
+  const wd = ts => `${new Date(ts).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(ts)}`;
+  if (wf) {
+    const pct = Math.round(wf.pHit * 100);
+    $("limit").textContent = wf.pHit < 0.10 ? "Improbable" : wf.hitQ ? wd(wf.hitQ[1]) : "—";
+    $("limit-in").textContent = `${pct} % prob.`;
+    $("at-reset").textContent = `~${fmtPct(wf.finalQ[1], 0)}`;
+    $("at-reset-sub").textContent = `${Math.round(wf.finalQ[0])}–${Math.round(wf.finalQ[2])} %`;
+    if (wf.pHit >= 0.5) { level = "danger"; icon = "⚠"; head = `${pct} % de probabilidad de agotarlo`; }
+    else if (wf.pHit >= 0.2) { level = "warn"; icon = "!"; head = `${pct} % de probabilidad de agotarlo`; }
+    if (wf.hitQ && wf.pHit >= 0.2) detail = `Lo más probable: ${wd(wf.hitQ[1])} · reinicio ${wd(w.resetsAt)}.`;
+    else detail = `Reinicio ${wd(w.resetsAt)}.`;
+    if (wf.learning) why = `(aún aprendiendo tus hábitos: ${wf.cycles} ${wf.cycles === 1 ? "semana" : "semanas"} de historial)`;
+  } else if (util !== null) {
+    if (util >= 99.5) { level = "danger"; icon = "⚠"; head = "Límite semanal alcanzado"; }
+    detail = hasReset ? `Reinicio ${wd(w.resetsAt)}.` : "";
+  }
+  $("v-icon").textContent = icon; $("v-text").textContent = head;
+  $("detail").textContent = detail; $("why").textContent = why;
+  $("meter-fill").className = `meter-fill ${level === "danger" ? "danger" : level === "warn" ? "warn" : ""}`;
+  hero.dataset.level = level;
 }
 
 // ── Gráficos ────────────────────────────────────────────────────────────────
@@ -249,7 +302,7 @@ function windowSpec() {
       }
       // Etiquetas de hora: extremos destacados, horas enteras entre medias.
       svg("text", { class: "tick edge", x: m.l, y: CHART_H - 6 }, root).textContent = fmtClock(t0);
-      svg("text", { class: "tick edge", x: m.l + pw, y: CHART_H - 6, "text-anchor": "end" }, root).textContent = `reinicio ${fmtClock(t1)}`;
+      svg("text", { class: "tick edge", x: m.l + pw, y: 12, "text-anchor": "end" }, root).textContent = `Reinicio ${dayLabel(t1)} ${fmtClock(t1)}`;
       const d = new Date(t0); d.setMinutes(0, 0, 0);
       for (let tick = d.getTime() < t0 ? d.getTime() + HOUR : d.getTime(); tick < t1; tick += HOUR) {
         const px = x(tick);
@@ -477,7 +530,7 @@ function renderChart() {
   const host = $("chart");
   hideTip();
   host.replaceChildren();
-  const spec = ui.tab === "hours" ? hoursSpec() : ui.tab === "windows" ? windowsSpec() : windowSpec();
+  const spec = ui.scope === "week" ? weekSpec() : ui.tab === "hours" ? hoursSpec() : ui.tab === "windows" ? windowsSpec() : windowSpec();
   if (ui.view === "table" && spec.head) drawTable(host, spec.head, spec.rows);
   else spec.draw(host);
 
@@ -495,6 +548,148 @@ function renderChart() {
   toggle.hidden = !spec.head;      // sin datos no hay tabla que mostrar
   toggle.setAttribute("aria-pressed", String(ui.view === "table"));
   toggle.textContent = ui.view === "table" ? "Ver gráfico" : "Ver tabla";
+  const nav = $("week-nav");
+  nav.hidden = ui.scope !== "week" || !ui.weekNav;
+  $("tabs").hidden = ui.scope === "week";
+  if (!nav.hidden) {
+    $("week-prev").disabled = !ui.weekNav.prev;
+    $("week-next").disabled = !ui.weekNav.next;
+    $("week-range").textContent = ui.weekNav.range;
+  }
+}
+
+
+// Semanas: un ciclo semanal de reinicio a reinicio, con franjas alternas por día local y proyección por perfil horario.
+// Los datos salen de weeklyLog; ‹ › (o [ ]) cambian de semana.
+function weekSpec() {
+  const log = model.weeklyLog || [];
+  const key = log.some(r => r[0] === "seven_day") ? "seven_day" : (log[0] && log[0][0]);
+  const cycles = log.filter(r => r[0] === key && Number.isFinite(r[1]) && r[3] && r[3].length).sort((a, b) => a[1] - b[1]);
+  ui.weekBack = Math.max(0, Math.min(ui.weekBack, cycles.length - 1));
+  const cycle = cycles[cycles.length - 1 - ui.weekBack];
+  ui.weekNav = { prev: ui.weekBack < cycles.length - 1, next: ui.weekBack > 0,
+    range: cycle ? `${fmtDay(cycle[1] - WEEK_MS)} – ${fmtDay(cycle[1])}${ui.weekBack === 0 ? " (actual)" : ""}` : "" };
+  if (!cycle) return emptySpec("Aún no hay datos semanales. Se irán llenando mientras uses Claude.");
+  const t1 = cycle[1], t0 = t1 - WEEK_MS, now = model.now;
+  let top = 0;   // el uso semanal no baja dentro de un ciclo; el máximo acumulado quita el vaivén entre fuentes
+  const pts = cycle[3].map(([ts, value]) => ({ ts, value: (top = Math.max(top, value)) })).filter(p => p.ts >= t0 - HOUR);
+  const last = pts[pts.length - 1];
+  const tEnd = Math.min(t1, Math.max(now, last.ts));
+  if (tEnd > last.ts) pts.push({ ts: tEnd, value: last.value });
+  const valueAt = t => {
+    let v = pts[0].value;
+    for (const p of pts) { if (p.ts <= t) v = p.value; else break; }
+    return v;
+  };
+  // Proyección por perfil horario (laboral / fin de semana); sin datos suficientes, el ritmo medio del ciclo hasta ahora.
+  let proj = null;
+  if (t1 > now && tEnd - t0 > 12 * HOUR && last.value > 0 && last.value < 100) {
+    const wf = weeklyForecast(log, cycle, now);
+    if (wf) {
+      wf.points[0] = { ts: tEnd, value: last.value };
+      const e = wf.points[wf.points.length - 1];
+      proj = { points: wf.points, band: wf.band, series: wf.band, ts: e.ts, value: e.value, hit: wf.hit, learning: wf.learning, cycles: wf.cycles, pHit: wf.pHit, hitQ: wf.hitQ, finalQ: wf.finalQ };
+    } else {
+      const rate = last.value / (tEnd - t0), hitTs = tEnd + (100 - last.value) / rate;
+      const e = hitTs < t1 ? { ts: hitTs, value: 100 } : { ts: t1, value: last.value + rate * (t1 - tEnd) };
+      proj = { points: [{ ts: tEnd, value: last.value }, e], series: { ts: [tEnd, e.ts], mid: [last.value, e.value], lo: null, hi: null }, ts: e.ts, value: e.value, hit: hitTs < t1, linear: true };
+    }
+  }
+  // Mediana y rango de la proyección en el instante t (interpolación entre puntos; la franja llega hasta el reinicio).
+  const projAt = t => {
+    const sr = proj.series;
+    for (let i = 1; i < sr.ts.length; i++) {
+      if (t > sr.ts[i]) continue;
+      const f = (t - sr.ts[i - 1]) / Math.max(1, sr.ts[i] - sr.ts[i - 1]), mix = a => a[i - 1] + (a[i] - a[i - 1]) * f;
+      return { value: mix(sr.mid), lo: sr.lo ? mix(sr.lo) : null, hi: sr.hi ? mix(sr.hi) : null };
+    }
+    const e = sr.ts.length - 1;
+    return { value: sr.mid[e], lo: sr.lo ? sr.lo[e] : null, hi: sr.hi ? sr.hi[e] : null };
+  };
+  const projEnd = () => proj.series.ts[proj.series.ts.length - 1];
+
+  // Días locales que cruzan el ciclo, recortados a [t0, t1].
+  const days = [];
+  for (let d = new Date(t0); d.setHours(0, 0, 0, 0) < t1; d.setDate(d.getDate() + 1)) {
+    const a = Math.max(t0, d.getTime()), nd = new Date(d); nd.setDate(nd.getDate() + 1);
+    days.push({ a, b: Math.min(t1, nd.getTime()) });
+  }
+  const gain = day => {
+    const a = Math.max(day.a, pts[0].ts), b = Math.min(day.b, tEnd);
+    return b > a ? Math.max(0, valueAt(b) - valueAt(a)) : null;
+  };
+
+  const past = t1 <= now;
+  const wkday = ts => `${new Date(ts).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(ts)}`;
+  // El uso, la probabilidad, la hora probable y el valor al reinicio ya están en la tarjeta principal; aquí solo el cierre de semanas pasadas.
+  const cap = past ? `Cerró en ${fmtPct(cycle[2], 0)}.` : "";
+
+  const rows = [];
+  if (proj) rows.push([proj.hit ? `Límite · ${wkday(proj.ts)}` : `Reinicio · ${wkday(proj.ts)}`, `~${fmtPct(proj.value, 0)} (proyección)`]);
+  for (const p of pts.slice().reverse().slice(0, 120)) rows.push([wkday(p.ts), fmtPct(p.value, 1)]);
+  return {
+    head: ["Momento", "Uso"],
+    rows,
+    legend: [{ cls: "", text: "Uso" }, ...(proj ? [{ cls: "dashed", text: "Proyección" }, ...(proj.band ? [{ cls: "band-key", text: "Rango 80 %" }] : [])] : []), { cls: "ref-key", text: "Ritmo parejo" }, ...(cap ? [{ cls: "note", text: cap }] : [])],   // el cierre va en la misma fila que la leyenda
+    caption: "",
+    draw(host) {
+      const m = { l: 34, r: 12, t: 24, b: 22 };
+      const pw = CHART_W - m.l - m.r, ph = CHART_H - m.t - m.b;
+      const x = linear(t0, t1, m.l, m.l + pw);
+      const y = linear(0, 100, m.t + ph, m.t);
+      const root = svg("svg", { viewBox: `0 0 ${CHART_W} ${CHART_H}`, tabindex: 0, role: "img",
+        "aria-label": "Uso semanal acumulado a lo largo del ciclo, con una franja por día." }, host);
+      svg("text", { class: "tick edge", x: m.l + pw, y: 12, "text-anchor": "end" }, root).textContent = `Reinicio ${wkday(t1)}`;
+      if (proj && proj.hit) svg("text", { class: "tick edge", x: m.l, y: 12 }, root).textContent = `Límite ${wkday(proj.ts)}`;
+        days.forEach((d, i) => {
+        if (i % 2 === 0) svg("rect", { class: "day-band", x: x(d.a), y: m.t, width: x(d.b) - x(d.a), height: ph }, root);
+        const wide = x(d.b) - x(d.a) > 22;
+        if (wide) svg("text", { class: `day-tick${d.a <= now && now < d.b ? " today" : ""}`, x: (x(d.a) + x(d.b)) / 2, y: CHART_H - 6, "text-anchor": "middle" }, root)
+          .textContent = new Date(d.a).toLocaleDateString(LOCALE, { weekday: "short" });
+      });
+      for (const v of [0, 25, 50, 75, 100]) {
+        svg("line", { class: v === 0 ? "axis" : "grid", x1: m.l, x2: m.l + pw, y1: y(v), y2: y(v) }, root);
+        svg("text", { class: "tick", x: m.l - 6, y: y(v) + 3.5, "text-anchor": "end" }, root).textContent = `${v}%`;
+      }
+      svg("line", { class: "ref", x1: x(t0), y1: y(0), x2: x(t1), y2: y(100) }, root);
+      const path = pts.map((p, i) => `${i ? "L" : "M"}${x(p.ts).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+      svg("path", { class: "area", d: `${path}L${x(tEnd).toFixed(1)},${y(0)}L${x(pts[0].ts).toFixed(1)},${y(0)}Z` }, root);
+      svg("path", { class: "line", d: path }, root);
+      if (proj) {
+        if (proj.band) {
+          const up = proj.band.ts.map((ts, i) => `${x(ts).toFixed(1)},${y(proj.band.hi[i]).toFixed(1)}`);
+          const down = proj.band.ts.map((ts, i) => `${x(ts).toFixed(1)},${y(proj.band.lo[i]).toFixed(1)}`).reverse();
+          svg("path", { class: "band", d: `M${up.join("L")}L${down.join("L")}Z` }, root);
+        }
+        svg("path", { class: "proj", d: proj.points.map((p, i) => `${i ? "L" : "M"}${x(p.ts).toFixed(1)},${y(p.value).toFixed(1)}`).join("") }, root);
+        svg("circle", { class: `dot${proj.hit ? " critical" : ""}`, r: 4, cx: x(proj.ts), cy: y(proj.value) }, root);
+      }
+      const cross = svg("line", { class: "cross", y1: m.t, y2: m.t + ph, visibility: "hidden" }, root);
+      const hoverDot = svg("circle", { class: "dot", r: 4, visibility: "hidden" }, root);
+      svg("circle", { class: "dot", r: 4, cx: x(tEnd), cy: y(last.value) }, root);
+
+      const show = (t, clientX, clientY) => {
+        t = Math.min(proj ? projEnd() : tEnd, Math.max(pts[0].ts, t));
+        const projected = proj && t > tEnd;
+        const pr = projected ? projAt(t) : null, v = projected ? pr.value : valueAt(t);
+        cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t)); cross.setAttribute("visibility", "visible");
+        hoverDot.setAttribute("cx", x(t)); hoverDot.setAttribute("cy", y(v)); hoverDot.setAttribute("visibility", "visible");
+        const day = days.find(d => t >= d.a && t < d.b) || days[days.length - 1], g = gain(day);
+        const rowsTip = [projected ? { key: "dashed", value: `~${fmtPct(v, 0)}`, name: "Proyección" } : { key: "", value: fmtPct(v, 1), name: "Uso semanal" }];
+        if (projected && pr.lo !== null) rowsTip.push({ key: "band-key", value: `${Math.round(pr.lo)}–${Math.round(pr.hi)} %`, name: "Rango 80 %" });
+        if (!projected && g !== null) rowsTip.push({ key: "ref-key", value: `+${num(g)} pp`, name: "ese día" });
+        showTip(clientX, clientY, `${dayLabel(t)} · ${fmtClock(t)}`, rowsTip);
+      };
+      const hide = () => { cross.setAttribute("visibility", "hidden"); hoverDot.setAttribute("visibility", "hidden"); hideTip(); };
+      root.addEventListener("pointermove", e => {
+        const r = root.getBoundingClientRect();
+        const px = (e.clientX - r.left) * CHART_W / r.width;
+        show(t0 + Math.min(1, Math.max(0, (px - m.l) / pw)) * WEEK_MS, e.clientX, e.clientY);
+      });
+      root.addEventListener("pointerleave", hide);
+      root.addEventListener("blur", hide);
+    },
+  };
 }
 
 // ── Datos y ajustes ─────────────────────────────────────────────────────────
@@ -504,8 +699,9 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "dataPriority", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "viewScope", "appVersion", "dataSource", "dataPriority", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
+  setScope(data.viewScope);
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
   $("number-alpha").value = alpha;
@@ -731,6 +927,29 @@ $("settings-back").addEventListener("click", () => showSettings(false));
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("view-settings").hidden) showSettings(false); });
 
 $("refresh").addEventListener("click", pollNow);
+function setScope(scope) {
+  ui.scope = scope === "week" ? "week" : "window";
+  $("scope-btn").textContent = ui.scope === "week" ? "Semana" : "Ventana";
+  $("scope-btn").setAttribute("aria-pressed", String(ui.scope === "week"));
+}
+// El modo se guarda en los ajustes de la app (sobrevive a los reinicios) y también decide qué muestra el ícono.
+$("scope-btn").addEventListener("click", () => {
+  setScope(ui.scope === "week" ? "window" : "week");
+  chrome.storage.local.set({ viewScope: ui.scope });
+  renderAll();
+});
+$("week-prev").addEventListener("click", () => { ui.weekBack++; renderChart(); });
+$("week-next").addEventListener("click", () => { ui.weekBack--; renderChart(); });
+// Teclado (en la vista «Semana»): ← o [ = semana anterior; → o ] = semana siguiente.
+document.addEventListener("keydown", e => {
+  if (ui.scope !== "week" || !$("view-settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest("input, select, textarea")) return;
+  const dir = e.key === "[" || e.key === "ArrowLeft" ? 1 : e.key === "]" || e.key === "ArrowRight" ? -1 : 0;
+  if (!dir || e.shiftKey) return;
+  e.preventDefault();
+  ui.weekBack = Math.max(0, ui.weekBack + dir);
+  renderChart();
+});
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => { ui.tab = b.dataset.tab; renderChart(); });
 $("view-toggle").addEventListener("click", () => { ui.view = ui.view === "table" ? "chart" : "table"; renderChart(); });
 $("alerts").addEventListener("change", e => chrome.storage.local.set({ [ALERTS_KEY]: e.target.checked }));
@@ -816,9 +1035,19 @@ $("open-at-login").addEventListener("change", e => chrome.storage.local.set({ op
 if (location.hash === "#settings") showSettings(true);
 setInterval(() => { model.now = Date.now(); renderSummary(); }, 15000);
 
+// La ventana toma el alto que pide la vista de uso (sin espacio vacío ni scroll sobrante); los ajustes, más largos, se desplazan.
+// Se repite cuando cambia el alto (Ventana/Semana, avisos, datos nuevos); la app lo ignora si el usuario cambió el tamaño a mano.
+let fitTimer = null;
+function fitPanel() {
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(() => {
+    if (!$("view-usage").hidden) chrome.runtime.sendMessage({ type: "PANEL_FIT", height: Math.ceil(document.querySelector("main").getBoundingClientRect().height) });
+  }, 120);
+}
+new ResizeObserver(fitPanel).observe(document.querySelector("main"));
+
 load().then(() => {
-  // La ventana toma el alto que pide la vista de uso (sin espacio vacío al pie); los ajustes, más largos, se desplazan.
-  if (!$("view-usage").hidden) chrome.runtime.sendMessage({ type: "PANEL_FIT", height: Math.ceil(document.querySelector("main").getBoundingClientRect().height) });
+  fitPanel();
   // Al abrir, refrescar si el dato tiene más de 30 s.
   if (!model.state.updatedAt || Date.now() - model.state.updatedAt > 30000) pollNow();
 });
