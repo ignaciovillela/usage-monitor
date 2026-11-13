@@ -16,7 +16,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CHART_W = 400;
 const CHART_H = 190;
 
-const ui = { tab: "window", view: "chart", weekBack: 0 };   // weekBack: cuántos ciclos semanales hacia atrás
+const ui = { tab: "window", view: "chart", weekBack: 0, scope: "window" };   // scope: "window" (ventana de 5 h) o "week" (ciclo semanal)   // weekBack: cuántos ciclos semanales hacia atrás
 let model = { state: {}, samples: [], now: Date.now() };
 
 const $ = id => document.getElementById(id);
@@ -130,6 +130,7 @@ function renderSummary() {
     $("at-reset-sub").textContent = "proyección";
   }
   document.querySelector(".hero").dataset.level = level;
+  if (ui.scope === "week") renderWeekHero(s, connected);
 
   const weekly = $("weekly");
   weekly.replaceChildren();
@@ -153,11 +154,59 @@ function renderSummary() {
     row.append(html("span", "", weeklyLabel(w.key)), meter, html("span", "value", fmtPct(w.utilization, 0)));
     weekly.append(row);
   }
-  weekly.hidden = !weekly.childElementCount;
+  weekly.hidden = !weekly.childElementCount || ui.scope === "week";
 
   const error = $("error");
   error.hidden = connected || !s.error;
   error.textContent = s.error || "";
+}
+
+// Vista «Semana»: la tarjeta principal pasa a los valores del ciclo semanal (uso, veredicto, reinicio, proyección por perfil horario).
+function renderWeekHero(s, connected) {
+  const now = model.now;
+  const w = connected ? (s.weekly || []).find(x => x.key === "seven_day") || (s.weekly || [])[0] : null;
+  const hero = document.querySelector(".hero");
+  const util = w && Number.isFinite(w.utilization) ? w.utilization : null;
+  const hasReset = !!w && Number.isFinite(w.resetsAt);
+  $("percent").textContent = util === null ? "—%" : fmtPct(util);
+  $("meter-fill").style.width = `${util === null ? 0 : util}%`;
+  const timeMark = $("meter-time");
+  const elapsed = hasReset ? Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / WEEK_MS)) : null;
+  timeMark.style.display = elapsed === null ? "none" : "block";
+  if (elapsed !== null) timeMark.style.left = `${elapsed * 100}%`;
+  $("elapsed").textContent = elapsed === null ? "—" : `${Math.round(elapsed * 100)}%`;
+  $("reset").textContent = hasReset ? `${new Date(w.resetsAt).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(w.resetsAt)}` : "—";
+  $("reset-in").textContent = hasReset ? `en ${fmtReset(w.resetsAt)}` : "";
+  const day = elapsed ? elapsed * 7 : 0;
+  $("rate").textContent = util !== null && day >= 0.25 ? `${num(util / day)} %/día` : "—";
+  $("confidence").textContent = "promedio";
+  let level = util !== null && util >= 90 ? "danger" : util !== null && util >= 70 ? "warn" : "ok";
+  let icon = "✓", head = util === null ? "Sin datos semanales" : "Vas bien esta semana", detail = "", why = "";
+  $("limit").textContent = "—"; $("limit-in").textContent = "";
+  $("at-reset").textContent = "—"; $("at-reset-sub").textContent = "proyección";
+  const log = model.weeklyLog || [];
+  const cycle = hasReset ? log.filter(r => r[0] === w.key && r[3] && r[3].length).sort((a, b) => b[1] - a[1])[0] : null;
+  const wf = cycle && util > 0 && util < 100 && elapsed > 0.1 ? weeklyForecast(log, [w.key, w.resetsAt, cycle[2], cycle[3]], now) : null;
+  const wd = ts => `${new Date(ts).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(ts)}`;
+  if (wf) {
+    const pct = Math.round(wf.pHit * 100);
+    $("limit").textContent = wf.pHit < 0.10 ? "Improbable" : wf.hitQ ? wd(wf.hitQ[1]) : "—";
+    $("limit-in").textContent = `${pct} % prob.`;
+    $("at-reset").textContent = `~${fmtPct(wf.finalQ[1], 0)}`;
+    $("at-reset-sub").textContent = `${Math.round(wf.finalQ[0])}–${Math.round(wf.finalQ[2])} %`;
+    if (wf.pHit >= 0.5) { level = "danger"; icon = "⚠"; head = `${pct} % de probabilidad de agotarlo`; }
+    else if (wf.pHit >= 0.2) { level = "warn"; icon = "!"; head = `${pct} % de probabilidad de agotarlo`; }
+    if (wf.hitQ && wf.pHit >= 0.2) detail = `Lo más probable: ${wd(wf.hitQ[1])} · reinicio ${wd(w.resetsAt)}.`;
+    else detail = `Reinicio ${wd(w.resetsAt)}.`;
+    if (wf.learning) why = `(aún aprendiendo tus hábitos: ${wf.cycles} ${wf.cycles === 1 ? "semana" : "semanas"} de historial)`;
+  } else if (util !== null) {
+    if (util >= 99.5) { level = "danger"; icon = "⚠"; head = "Límite semanal alcanzado"; }
+    detail = hasReset ? `Reinicio ${wd(w.resetsAt)}.` : "";
+  }
+  $("v-icon").textContent = icon; $("v-text").textContent = head;
+  $("detail").textContent = detail; $("why").textContent = why;
+  $("meter-fill").className = `meter-fill ${level === "danger" ? "danger" : level === "warn" ? "warn" : ""}`;
+  hero.dataset.level = level;
 }
 
 // ── Gráficos ────────────────────────────────────────────────────────────────
@@ -477,7 +526,7 @@ function renderChart() {
   const host = $("chart");
   hideTip();
   host.replaceChildren();
-  const spec = ui.tab === "hours" ? hoursSpec() : ui.tab === "windows" ? windowsSpec() : ui.tab === "weeks" ? weekSpec() : windowSpec();
+  const spec = ui.scope === "week" ? weekSpec() : ui.tab === "hours" ? hoursSpec() : ui.tab === "windows" ? windowsSpec() : windowSpec();
   if (ui.view === "table" && spec.head) drawTable(host, spec.head, spec.rows);
   else spec.draw(host);
 
@@ -496,7 +545,8 @@ function renderChart() {
   toggle.setAttribute("aria-pressed", String(ui.view === "table"));
   toggle.textContent = ui.view === "table" ? "Ver gráfico" : "Ver tabla";
   const nav = $("week-nav");
-  nav.hidden = ui.tab !== "weeks" || !ui.weekNav;
+  nav.hidden = ui.scope !== "week" || !ui.weekNav;
+  $("tabs").hidden = ui.scope === "week";
   if (!nav.hidden) {
     $("week-prev").disabled = !ui.weekNav.prev;
     $("week-next").disabled = !ui.weekNav.next;
@@ -889,12 +939,20 @@ $("settings-back").addEventListener("click", () => showSettings(false));
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("view-settings").hidden) showSettings(false); });
 
 $("refresh").addEventListener("click", pollNow);
+$("scope-btn").addEventListener("click", () => {
+  ui.scope = ui.scope === "week" ? "window" : "week";
+  $("scope-btn").textContent = ui.scope === "week" ? "Semana" : "Ventana";
+  $("scope-btn").setAttribute("aria-pressed", String(ui.scope === "week"));
+  try { localStorage.setItem("scope", ui.scope); } catch {}
+  renderAll();
+});
+try { if (localStorage.getItem("scope") === "week") { ui.scope = "week"; $("scope-btn").textContent = "Semana"; $("scope-btn").setAttribute("aria-pressed", "true"); } } catch {}
 $("week-prev").addEventListener("click", () => { ui.weekBack++; renderChart(); });
 $("week-next").addEventListener("click", () => { ui.weekBack--; renderChart(); });
-// Teclado (en la pestaña «Semanas»): [ o Mayús+← = semana anterior; ] o Mayús+→ = semana siguiente.
+// Teclado (en la vista «Semana»): [ o Mayús+← = semana anterior; ] o Mayús+→ = semana siguiente.
 // Las flechas solas siguen recorriendo los puntos del gráfico cuando está enfocado.
 document.addEventListener("keydown", e => {
-  if (ui.tab !== "weeks" || !$("view-settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (ui.scope !== "week" || !$("view-settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest && e.target.closest("input, select, textarea")) return;
   const dir = e.key === "[" || (e.shiftKey && e.key === "ArrowLeft") ? 1 : e.key === "]" || (e.shiftKey && e.key === "ArrowRight") ? -1 : 0;
   if (!dir) return;

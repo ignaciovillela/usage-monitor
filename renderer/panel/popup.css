@@ -54,6 +54,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:hover { background: var(--hover); color: var(--ink); }
 .icon-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.scope-btn { height: 32px; padding: 0 11px; border-radius: 9px; font-weight: 600; color: var(--ink-2); }
+.scope-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .icon-btn.spinning svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -125,6 +127,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 /* ── Gráficos ── */
 .charts { padding: 10px 12px 12px; }
 .chart-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 8px; margin-bottom: 8px; }
+.chart-bar #view-toggle { margin-left: auto; }
 .segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--hover); }
 .segmented button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; cursor: pointer; color: var(--ink-2); font-size: 12px; }
 .segmented button:hover { color: var(--ink); }
