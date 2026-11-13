@@ -546,11 +546,12 @@ function weeklyForecast(log, cur, now) {
   hits.sort((a, b) => a - b);
   const pHit = hits.length / WK_PATHS;
   const hitQ = hits.length ? [quantile(hits, 0.1), quantile(hits, 0.5), quantile(hits, 0.9)] : null;
-  // La línea central se corta donde la mediana toca el 100 %.
+  // La línea central se corta donde la mediana toca el 100 %; la franja de rango sigue hasta el reinicio.
+  const series = { ts: points.map(p => p.ts), mid: points.map(p => p.value), lo, hi };
   const cut = points.findIndex(p => p.value >= 99.5);
   const hit = cut > 0;
-  if (hit) { points.length = cut + 1; lo.length = cut + 1; hi.length = cut + 1; points[cut] = { ts: hitQ ? Math.min(points[cut].ts, hitQ[1]) : points[cut].ts, value: 100 }; }
-  return { points, band: { lo, hi }, hit, pHit, hitQ, finalQ: [lo[lo.length - 1], points[points.length - 1].value, hi[hi.length - 1]],
+  if (hit) { points.length = cut + 1; points[cut] = { ts: points[cut].ts, value: 100 }; }
+  return { points, band: series, hit, pHit, hitQ, finalQ: [lo[lo.length - 1], series.mid[series.mid.length - 1], hi[hi.length - 1]],
     theta, learning: past < WK_MIN_CYCLES, cycles: past };
 }
 // Entrada: [reinicio, ts, uso×10, pHit×1000, mediana|0]
