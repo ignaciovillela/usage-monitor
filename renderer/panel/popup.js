@@ -134,7 +134,11 @@ function renderSummary() {
 
   const weekly = $("weekly");
   weekly.replaceChildren();
-  for (const w of s.weekly || []) {
+  // En la vista «Semana» la tarjeta principal es la semanal, así que esta fila pasa a mostrar la ventana de 5 h.
+  const rowsData = ui.scope === "week"
+    ? (connected && Number.isFinite(s.utilization) ? [{ label: "Ventana 5 h", utilization: s.utilization, resetsAt: s.idle ? NaN : s.resetsAt, span: WINDOW_MS }] : [])
+    : (s.weekly || []).map(w => ({ label: weeklyLabel(w.key), utilization: w.utilization, resetsAt: w.resetsAt, span: WEEK_MS }));
+  for (const w of rowsData) {
     const row = html("div", "weekly-row");
     const meter = html("div", "meter");
     const f = html("div", `meter-fill ${w.utilization >= 90 ? "danger" : w.utilization >= 70 ? "warn" : ""}`);
@@ -142,7 +146,7 @@ function renderSummary() {
     meter.append(f);
     // Marca de tiempo transcurrido de la semana (la ventana semanal dura 7 días desde su inicio).
     if (Number.isFinite(w.resetsAt)) {
-      const elapsed = Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / WEEK_MS));
+      const elapsed = Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / w.span));
       const mark = html("div", "meter-time");
       mark.style.display = "block";
       mark.style.left = `${elapsed * 100}%`;
@@ -151,10 +155,10 @@ function renderSummary() {
       meter.setAttribute("role", "img");
       meter.setAttribute("aria-label", row.title);
     }
-    row.append(html("span", "", weeklyLabel(w.key)), meter, html("span", "value", fmtPct(w.utilization, 0)));
+    row.append(html("span", "", w.label), meter, html("span", "value", fmtPct(w.utilization, 0)));
     weekly.append(row);
   }
-  weekly.hidden = !weekly.childElementCount || ui.scope === "week";
+  weekly.hidden = !weekly.childElementCount;
 
   const error = $("error");
   error.hidden = connected || !s.error;

@@ -164,11 +164,11 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .caption { margin-top: 6px; }
 
 /* Semanas: navegación entre ciclos y franjas por día */
-.week-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 6px; }
+.week-nav { display: flex; align-items: center; gap: 6px; }
 .icon-btn.small { width: 26px; height: 26px; border-radius: 8px; }
 .icon-btn.small svg { width: 15px; height: 15px; }
 .icon-btn:disabled { opacity: .4; cursor: default; background: var(--surface); color: var(--ink-2); }
-.week-range { min-width: 150px; text-align: center; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.week-range { min-width: 120px; text-align: center; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .day-band { fill: var(--ink); opacity: .05; }
 .day-tick { fill: var(--muted); font-size: 10px; }
 .day-tick.today { fill: var(--ink); font-weight: 650; }
