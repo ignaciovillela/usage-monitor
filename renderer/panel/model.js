@@ -722,3 +722,25 @@ function step(persisted, usage, now, opts = {}) {
   }
   return { persisted: { samples, blocks, model, windows, forecastLog: flog, weeklyLog, state }, dirty, events };
 }
+
+// Ícono en vista «Semana»: uso y tiempo del ciclo semanal, veredicto por probabilidad de agotarlo (proyección por perfil horario).
+// Devuelve { level, text, state } con `state` mínimo para iconParams (utilización y reinicio semanales).
+function weekBadge(state, log, mode, now = Date.now()) {
+  const w = state && state.status === "connected" ? (state.weekly || []).find(x => x.key === "seven_day") || (state.weekly || [])[0] : null;
+  if (!w || !Number.isFinite(w.utilization)) return { level: state && state.status === "auth" ? "error" : "idle", text: "", state: { status: "connected", idle: true } };
+  const util = w.utilization, hasReset = Number.isFinite(w.resetsAt);
+  const elapsed = hasReset ? Math.min(1, Math.max(0, 1 - (w.resetsAt - now) / (7 * DAY_MS))) : 0;
+  const cycle = hasReset ? (log || []).filter(r => r[0] === w.key && r[3] && r[3].length).sort((a, b) => b[1] - a[1])[0] : null;
+  const wf = cycle && util > 0 && util < 100 && elapsed > 0.1 ? weeklyForecast(log, [w.key, w.resetsAt, cycle[2], cycle[3]], now) : null;
+  let level = util >= 95 ? "danger" : util >= 90 ? "warn" : "ok";
+  if (wf) level = wf.pHit >= 0.5 ? "danger" : wf.pHit >= 0.2 || util >= 90 ? "warn" : level;
+  let text = String(Math.round(util));
+  if (mode === "pace" || mode === "prob") {
+    text = wf && (mode === "prob" || level !== "ok") ? `${Math.round(wf.pHit * 100)}%` : level === "ok" ? "" : text;
+  } else if (mode === "limit") {
+    text = wf && wf.hitQ && wf.pHit >= 0.5 ? fmtShort((wf.hitQ[1] - now) / MINUTE) : text;
+  } else if (mode === "reset" && hasReset && w.resetsAt > now) {
+    text = fmtShort((w.resetsAt - now) / MINUTE);
+  }
+  return { level, text, state: { status: "connected", utilization: util, resetsAt: w.resetsAt } };
+}

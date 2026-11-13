@@ -640,6 +640,7 @@ function weekSpec() {
       const root = svg("svg", { viewBox: `0 0 ${CHART_W} ${CHART_H}`, tabindex: 0, role: "img",
         "aria-label": "Uso semanal acumulado a lo largo del ciclo, con una franja por día." }, host);
       svg("text", { class: "tick edge", x: m.l + pw, y: 12, "text-anchor": "end" }, root).textContent = `Reinicio ${wkday(t1)}`;
+      if (proj && proj.hit) svg("text", { class: "tick edge", x: m.l, y: 12 }, root).textContent = `Límite ${wkday(proj.ts)}`;
         days.forEach((d, i) => {
         if (i % 2 === 0) svg("rect", { class: "day-band", x: x(d.a), y: m.t, width: x(d.b) - x(d.a), height: ph }, root);
         const wide = x(d.b) - x(d.a) > 22;
@@ -662,9 +663,6 @@ function weekSpec() {
         }
         svg("path", { class: "proj", d: proj.points.map((p, i) => `${i ? "L" : "M"}${x(p.ts).toFixed(1)},${y(p.value).toFixed(1)}`).join("") }, root);
         svg("circle", { class: `dot${proj.hit ? " critical" : ""}`, r: 4, cx: x(proj.ts), cy: y(proj.value) }, root);
-        const py = y(proj.value);
-        svg("text", { class: "label", "text-anchor": "end", x: x(proj.ts) - 8, y: py < m.t + 16 ? py + 16 : py - 8 }, root).textContent =
-          proj.hit ? `${new Date(proj.ts).toLocaleDateString(LOCALE, { weekday: "short" })} ${fmtClock(proj.ts)}` : `~${fmtPct(proj.value, 0)}`;
       }
       const cross = svg("line", { class: "cross", y1: m.t, y2: m.t + ph, visibility: "hidden" }, root);
       const hoverDot = svg("circle", { class: "dot", r: 4, visibility: "hidden" }, root);
@@ -701,8 +699,9 @@ function renderAll() {
 }
 const fmtDay = ts => new Date(ts).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
 async function load() {
-  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "appVersion", "dataSource", "dataPriority", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
+  const data = await chrome.storage.local.get([STATE_KEY, SAMPLES_KEY, ALERTS_KEY, BADGE_KEY, ICON_SHAPE_KEY, NUMBER_ALPHA_KEY, NUMBER_SCALE_KEY, NUMBER_DX_KEY, NUMBER_DY_KEY, BLOCKS_KEY, WINDOWS_KEY, FLOG_KEY, WEEKLY_KEY, "viewScope", "appVersion", "dataSource", "dataPriority", "claudeCodeConnected", "remoteUrl", "remoteUrlOnline", "remoteTokenSet", "remoteFromEnv", "serverVersion", "remoteVia", "updateAdvice", "updateCheck", "repoUrl", "updateChannel", "canInstallUpdate", "updateSummary", "updateProgress", "pollSeconds", "openAtLogin"]);
   model = { state: data[STATE_KEY] || {}, samples: unpackSamples(data[SAMPLES_KEY]), blocks: data[BLOCKS_KEY] || [], weeklyLog: data[WEEKLY_KEY] || [], now: Date.now() };
+  setScope(data.viewScope);
   $("icon-shape").value = ["rings", "donut", "pie1", "pie2", "pie3"].includes(data[ICON_SHAPE_KEY]) ? data[ICON_SHAPE_KEY] : "donut";
   const alpha = Math.round(Math.min(1, Math.max(0.15, Number(data[NUMBER_ALPHA_KEY]) || 0.48)) * 100);
   $("number-alpha").value = alpha;
@@ -928,14 +927,17 @@ $("settings-back").addEventListener("click", () => showSettings(false));
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("view-settings").hidden) showSettings(false); });
 
 $("refresh").addEventListener("click", pollNow);
-$("scope-btn").addEventListener("click", () => {
-  ui.scope = ui.scope === "week" ? "window" : "week";
+function setScope(scope) {
+  ui.scope = scope === "week" ? "week" : "window";
   $("scope-btn").textContent = ui.scope === "week" ? "Semana" : "Ventana";
   $("scope-btn").setAttribute("aria-pressed", String(ui.scope === "week"));
-  try { localStorage.setItem("scope", ui.scope); } catch {}
+}
+// El modo se guarda en los ajustes de la app (sobrevive a los reinicios) y también decide qué muestra el ícono.
+$("scope-btn").addEventListener("click", () => {
+  setScope(ui.scope === "week" ? "window" : "week");
+  chrome.storage.local.set({ viewScope: ui.scope });
   renderAll();
 });
-try { if (localStorage.getItem("scope") === "week") { ui.scope = "week"; $("scope-btn").textContent = "Semana"; $("scope-btn").setAttribute("aria-pressed", "true"); } } catch {}
 $("week-prev").addEventListener("click", () => { ui.weekBack++; renderChart(); });
 $("week-next").addEventListener("click", () => { ui.weekBack--; renderChart(); });
 // Teclado (en la vista «Semana»): ← o [ = semana anterior; → o ] = semana siguiente.

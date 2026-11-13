@@ -335,3 +335,18 @@ test("weeklyForecast: si ya va casi al límite, la probabilidad de agotarlo es a
   assert(wf.pHit > 0.7, `pHit ${wf.pHit}`);
   assert(wf.hitQ && wf.hitQ[0] <= wf.hitQ[1] && wf.hitQ[1] <= wf.hitQ[2]);
 });
+
+test("weekBadge: ícono de la vista Semana usa el uso y el reinicio semanales", () => {
+  const cur = weeklyCycle(R_CUR, WK_NOW), log = [weeklyCycle(R_PREV2, Infinity), weeklyCycle(R_PREV, Infinity), cur];
+  const state = { status: "connected", utilization: 10, resetsAt: WK_NOW + HOUR, weekly: [{ key: "seven_day", utilization: cur[2], resetsAt: R_CUR }] };
+  const b = m.weekBadge(state, log, "percent", WK_NOW);
+  assert.equal(b.state.utilization, cur[2]);
+  assert.equal(b.state.resetsAt, R_CUR);
+  assert.equal(b.text, String(Math.round(cur[2])));
+  assert.ok(["ok", "warn", "danger"].includes(b.level));
+  assert.equal(m.iconParams(b.state, b.level, WK_NOW, b.text, "donut", "255,255,255", 0.7, {}, 7 * 24 * HOUR).elapsed.toFixed(2),
+    (1 - (R_CUR - WK_NOW) / (7 * 24 * HOUR)).toFixed(2));
+  const none = m.weekBadge({ status: "connected", utilization: 10, resetsAt: WK_NOW + HOUR }, log, "pace", WK_NOW);
+  assert.equal(none.text, "");
+  assert.equal(none.level, "idle");
+});
