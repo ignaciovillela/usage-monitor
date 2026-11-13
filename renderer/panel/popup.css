@@ -41,7 +41,7 @@ button, select { font: inherit; color: inherit; }
 .icon-btn:hover, .tabs button:hover, .text-btn:hover { background: var(--hover); }
 button:focus-visible, select:focus-visible, svg:focus-visible, input:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
 
-.hero, .tile, .charts, .weekly, .settings { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.hero, .tile, .charts, .weekly, .settings, .weekchart { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .hero { padding: 14px; }
 .hero-row { display: flex; align-items: center; gap: 14px; }
 .percent { font-size: 52px; line-height: 1; font-weight: 700; letter-spacing: -2px; flex: none; }
@@ -134,6 +134,21 @@ th { position: sticky; top: 0; background: var(--surface); color: var(--ink-2); 
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .updates p { margin: 0 0 6px; }
+.weekchart { margin-top: 10px; padding: 0; overflow: hidden; }
+.weekchart > summary { list-style: none; cursor: pointer; padding: 11px 14px; font-weight: 650; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.weekchart > summary::-webkit-details-marker { display: none; }
+.weekchart > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: 2px; }
+.weekchart[open] > summary::before { transform: rotate(45deg); }
+.weekchart[open] > summary { border-bottom: 1px solid var(--grid); }
+.weekchart > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.weekchart > .caption { margin-bottom: 12px; }
+.week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.week-nav .icon-btn { width: 26px; height: 26px; font-size: 15px; }
+.week-nav .icon-btn:disabled { opacity: .35; cursor: default; }
+.weekchart .chart { margin-top: 8px; }
+.day-band { fill: var(--ink); opacity: .05; }
+.day-tick { fill: var(--ink-2); font-size: 10px; }
+.day-tick.today { fill: var(--ink); font-weight: 700; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .text-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
 .text-btn.danger { border-color: var(--critical); }
