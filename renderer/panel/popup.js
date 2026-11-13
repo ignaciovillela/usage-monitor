@@ -298,7 +298,7 @@ function windowSpec() {
       }
       // Etiquetas de hora: extremos destacados, horas enteras entre medias.
       svg("text", { class: "tick edge", x: m.l, y: CHART_H - 6 }, root).textContent = fmtClock(t0);
-      svg("text", { class: "tick edge", x: m.l + pw, y: CHART_H - 6, "text-anchor": "end" }, root).textContent = `reinicio ${fmtClock(t1)}`;
+      svg("text", { class: "tick edge", x: m.l + pw, y: 12, "text-anchor": "end" }, root).textContent = `Reinicio ${dayLabel(t1)} ${fmtClock(t1)}`;
       const d = new Date(t0); d.setMinutes(0, 0, 0);
       for (let tick = d.getTime() < t0 ? d.getTime() + HOUR : d.getTime(); tick < t1; tick += HOUR) {
         const px = x(tick);
@@ -637,13 +637,14 @@ function weekSpec() {
     legend: [{ cls: "", text: "Uso" }, ...(proj ? [{ cls: "dashed", text: "Proyección" }, ...(proj.band ? [{ cls: "band-key", text: "Rango 80 %" }] : [])] : []), { cls: "ref-key", text: "Ritmo parejo" }],
     caption: cap.replace(/  +/g, " "),
     draw(host) {
-      const m = { l: 34, r: 12, t: 14, b: 22 };
+      const m = { l: 34, r: 12, t: 24, b: 22 };
       const pw = CHART_W - m.l - m.r, ph = CHART_H - m.t - m.b;
       const x = linear(t0, t1, m.l, m.l + pw);
       const y = linear(0, 100, m.t + ph, m.t);
       const root = svg("svg", { viewBox: `0 0 ${CHART_W} ${CHART_H}`, tabindex: 0, role: "img",
         "aria-label": "Uso semanal acumulado a lo largo del ciclo, con una franja por día." }, host);
-      days.forEach((d, i) => {
+      svg("text", { class: "tick edge", x: m.l + pw, y: 12, "text-anchor": "end" }, root).textContent = `Reinicio ${wkday(t1)}`;
+        days.forEach((d, i) => {
         if (i % 2 === 0) svg("rect", { class: "day-band", x: x(d.a), y: m.t, width: x(d.b) - x(d.a), height: ph }, root);
         const wide = x(d.b) - x(d.a) > 22;
         if (wide) svg("text", { class: `day-tick${d.a <= now && now < d.b ? " today" : ""}`, x: (x(d.a) + x(d.b)) / 2, y: CHART_H - 6, "text-anchor": "middle" }, root)
