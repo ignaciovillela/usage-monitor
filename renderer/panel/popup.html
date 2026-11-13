@@ -72,8 +72,18 @@
             <button role="tab" data-tab="window" aria-selected="true">Ventana</button>
             <button role="tab" data-tab="hours" aria-selected="false">24 horas</button>
             <button role="tab" data-tab="windows" aria-selected="false">Ventanas</button>
+            <button role="tab" data-tab="weeks" aria-selected="false">Semanas</button>
           </div>
           <button id="view-toggle" class="link-btn" aria-pressed="false">Ver tabla</button>
+        </div>
+        <div id="week-nav" class="week-nav" hidden>
+          <button id="week-prev" class="icon-btn small" title="Semana anterior ([ o Mayús+←)" aria-label="Semana anterior" aria-keyshortcuts="[ Shift+ArrowLeft">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <span id="week-range" class="week-range" aria-live="polite"></span>
+          <button id="week-next" class="icon-btn small" title="Semana siguiente (] o Mayús+→)" aria-label="Semana siguiente" aria-keyshortcuts="] Shift+ArrowRight">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
         </div>
         <div id="chart" class="chart"></div>
         <div id="legend" class="legend muted"></div>
